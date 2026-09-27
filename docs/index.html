@@ -100,7 +100,7 @@
       white-space: nowrap;
     }
 
-    #aiProgress {
+    .ai-progress {
       display: none;
       margin-top: 12px;
       padding: 10px;
@@ -203,6 +203,8 @@
       </button>
     </div>
 
+    <div id="englishTitleAIProgress" class="ai-progress"></div>
+
     <label for="description">Description</label>
 
     <div class="field-actions">
@@ -217,7 +219,7 @@
       </button>
     </div>
 
-    <div id="aiProgress"></div>
+    <div id="descriptionAIProgress" class="ai-progress"></div>
 
     <div id="descriptionOptions">
       <strong>Description options</strong>
@@ -309,7 +311,11 @@
     const generateEnglishTitleButton =
       document.getElementById("generateEnglishTitle");
 
-    const aiProgress = document.getElementById("aiProgress");
+    const englishTitleAIProgress =
+      document.getElementById("englishTitleAIProgress");
+
+    const descriptionAIProgress =
+      document.getElementById("descriptionAIProgress");
 
     const descriptionOptions =
       document.getElementById("descriptionOptions");
@@ -729,8 +735,8 @@ ${title}
       return request;
     }
 
-    function renderAIProgress(reasoning, content) {
-      aiProgress.style.display = "block";
+    function renderAIProgress(progressElement, reasoning, content) {
+      progressElement.style.display = "block";
 
       let text = "";
 
@@ -750,8 +756,8 @@ ${title}
         text = "Waiting for response...";
       }
 
-      aiProgress.textContent = text;
-      aiProgress.scrollTop = aiProgress.scrollHeight;
+      progressElement.textContent = text;
+      progressElement.scrollTop = progressElement.scrollHeight;
     }
 
     function parseDescriptionJSON(text) {
@@ -869,7 +875,11 @@ ${title}
       }
     }
 
-    async function requestAI(prompt, structuredOutput) {
+    async function requestAI(
+      prompt,
+      structuredOutput,
+      progressElement
+    ) {
       const {
         endpoint,
         apiKey,
@@ -888,8 +898,8 @@ ${title}
       let generatedContent = "";
       let generatedReasoning = "";
 
-      aiProgress.style.display = "block";
-      aiProgress.textContent = "Connecting...";
+      progressElement.style.display = "block";
+      progressElement.textContent = "Connecting...";
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -928,6 +938,7 @@ ${title}
         }
 
         renderAIProgress(
+          progressElement,
           generatedReasoning,
           generatedContent
         );
@@ -960,6 +971,7 @@ ${title}
           } catch {
             generatedContent += raw;
             renderAIProgress(
+              progressElement,
               generatedReasoning,
               generatedContent
             );
@@ -977,6 +989,7 @@ ${title}
           generatedReasoning += extracted.reasoning;
 
           renderAIProgress(
+            progressElement,
             generatedReasoning,
             generatedContent
           );
@@ -1030,6 +1043,7 @@ ${title}
       }
 
       renderAIProgress(
+        progressElement,
         generatedReasoning,
         generatedContent
       );
@@ -1075,7 +1089,8 @@ ${title}
       try {
         const translation = await requestAI(
           createTitleTranslationPrompt(title),
-          false
+          false,
+          englishTitleAIProgress
         );
 
         englishTitleInput.value = translation
@@ -1085,8 +1100,9 @@ ${title}
           .trim();
       } catch (error) {
         console.error(error);
-        aiProgress.style.display = "block";
-        aiProgress.textContent = `Error:\n${error.message}`;
+        englishTitleAIProgress.style.display = "block";
+        englishTitleAIProgress.textContent =
+          `Error:\n${error.message}`;
       } finally {
         generateEnglishTitleButton.disabled = false;
         generateEnglishTitleButton.textContent =
@@ -1116,7 +1132,8 @@ ${title}
       try {
         const generatedContent = await requestAI(
           createPrompt(body),
-          true
+          true,
+          descriptionAIProgress
         );
         const descriptions =
           parseDescriptionJSON(generatedContent);
@@ -1124,8 +1141,9 @@ ${title}
         showDescriptionOptions(descriptions);
       } catch (error) {
         console.error(error);
-        aiProgress.style.display = "block";
-        aiProgress.textContent = `Error:\n${error.message}`;
+        descriptionAIProgress.style.display = "block";
+        descriptionAIProgress.textContent =
+          `Error:\n${error.message}`;
       } finally {
         generateDescriptionButton.disabled = false;
         generateDescriptionButton.textContent =
