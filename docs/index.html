@@ -182,6 +182,20 @@
     <label for="title">Title</label>
     <input id="title" type="text" placeholder="My Blog Post">
 
+    <label for="englishTitle">English title (used for filename)</label>
+
+    <div class="field-actions">
+      <input
+        id="englishTitle"
+        type="text"
+        placeholder="My Blog Post"
+      >
+
+      <button id="generateEnglishTitle" type="button">
+        Translate with AI
+      </button>
+    </div>
+
     <label for="description">Description</label>
 
     <div class="field-actions">
@@ -268,6 +282,8 @@
 
   <script>
     const titleInput = document.getElementById("title");
+    const englishTitleInput =
+      document.getElementById("englishTitle");
     const descriptionInput = document.getElementById("description");
     const dateInput = document.getElementById("date");
     const contentInput = document.getElementById("content");
@@ -279,6 +295,9 @@
 
     const generateDescriptionButton =
       document.getElementById("generateDescription");
+
+    const generateEnglishTitleButton =
+      document.getElementById("generateEnglishTitle");
 
     const aiProgress = document.getElementById("aiProgress");
 
@@ -400,7 +419,7 @@ ${content}`;
     }
 
     function createFilename() {
-      const slug = titleInput.value
+      const slug = englishTitleInput.value
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9\s-]/g, "")
@@ -408,7 +427,17 @@ ${content}`;
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "");
 
-      return `${slug || "post"}.md`;
+      const selectedDate = dateInput.value
+        ? new Date(dateInput.value)
+        : new Date();
+
+      const datePrefix = [
+        selectedDate.getFullYear(),
+        pad(selectedDate.getMonth() + 1),
+        pad(selectedDate.getDate())
+      ].join("");
+
+      return `${datePrefix}-${slug || "post"}.md`;
     }
 
     function loadConfig() {
@@ -527,6 +556,13 @@ ${content}`;
       if (!choice && !data.type) {
         content += textValue(data.content);
 
+        if (Array.isArray(data.output)) {
+          content += data.output
+            .flatMap(item => item.content || [])
+            .map(textValue)
+            .join("");
+        }
+
         reasoning += textValue(
           data.reasoning_content ??
           data.reasoning ??
@@ -615,27 +651,45 @@ Article:
 ${body}`;
     }
 
-    function createRequest(endpoint, model, prompt) {
+    function createTitleTranslationPrompt(title) {
+      return `You are a professional translator. Your goal is to accurately convey the meaning and nuances of the original text while adhering to English grammar, vocabulary, and cultural sensitivities.
+Produce only the English translation, without any additional explanations or commentary. Please translate the following text into English:
+
+${title}
+`;
+    }
+
+    function createRequest(
+      endpoint,
+      model,
+      prompt,
+      structuredOutput = true
+    ) {
       const isResponsesAPI =
         /\/responses\/?$/i.test(endpoint);
 
       if (isResponsesAPI) {
-        return {
+        const request = {
           model,
           input: prompt,
-          stream: true,
-          text: {
+          stream: true
+        };
+
+        if (structuredOutput) {
+          request.text = {
             format: {
               type: "json_schema",
               name: "article_descriptions",
               strict: true,
               schema: descriptionSchema
             }
-          }
-        };
+          };
+        }
+
+        return request;
       }
 
-      return {
+      const request = {
         model,
         messages: [
           {
@@ -643,16 +697,21 @@ ${body}`;
             content: prompt
           }
         ],
-        stream: true,
-        response_format: {
+        stream: true
+      };
+
+      if (structuredOutput) {
+        request.response_format = {
           type: "json_schema",
           json_schema: {
             name: "article_descriptions",
             strict: true,
             schema: descriptionSchema
           }
-        }
-      };
+        };
+      }
+
+      return request;
     }
 
     function renderAIProgress(reasoning, content) {
@@ -795,33 +854,12 @@ ${body}`;
       }
     }
 
-    async function generateDescription() {
-      saveConfig(false);
-
+    async function requestAI(prompt, structuredOutput) {
       const {
         endpoint,
         apiKey,
         model
       } = getConfig();
-
-      const body = contentInput.value;
-
-      if (!endpoint) {
-        alert("Configure the API endpoint first.");
-        return;
-      }
-
-      if (!model) {
-        alert("Configure the model first.");
-        return;
-      }
-
-      if (!body.trim()) {
-        alert("Enter article content first.");
-        return;
-      }
-
-      const prompt = createPrompt(body);
 
       const headers = {
         "Content-Type": "application/json",
@@ -835,178 +873,242 @@ ${body}`;
       let generatedContent = "";
       let generatedReasoning = "";
 
-      generateDescriptionButton.disabled = true;
-      generateDescriptionButton.textContent = "Generating...";
-
-      descriptionOptions.style.display = "none";
-      descriptionOptionsList.replaceChildren();
-
       aiProgress.style.display = "block";
       aiProgress.textContent = "Connecting...";
 
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(
-            createRequest(endpoint, model, prompt)
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(
+          createRequest(
+            endpoint,
+            model,
+            prompt,
+            structuredOutput
           )
-        });
+        )
+      });
 
-        if (!response.ok) {
-          const errorText = await response.text();
+      if (!response.ok) {
+        const errorText = await response.text();
 
-          throw new Error(
-            `API error ${response.status}: ${errorText}`
-          );
+        throw new Error(
+          `API error ${response.status}: ${errorText}`
+        );
+      }
+
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      if (!contentType.includes("text/event-stream")) {
+        const data = await response.json();
+        const extracted = extractStreamText(data);
+
+        generatedContent += extracted.content;
+        generatedReasoning += extracted.reasoning;
+
+        if (!generatedContent) {
+          generatedContent +=
+            textValue(data.choices?.[0]?.message?.content);
         }
-
-        const contentType =
-          response.headers.get("content-type") || "";
-
-        if (!contentType.includes("text/event-stream")) {
-          const data = await response.json();
-
-          const extracted = extractStreamText(data);
-
-          generatedContent += extracted.content;
-          generatedReasoning += extracted.reasoning;
-
-          if (!generatedContent) {
-            generatedContent +=
-              textValue(data.choices?.[0]?.message?.content);
-          }
-
-          renderAIProgress(
-            generatedReasoning,
-            generatedContent
-          );
-        } else {
-          if (!response.body) {
-            throw new Error(
-              "Streaming response has no body."
-            );
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-
-          let buffer = "";
-          let eventDataLines = [];
-
-          function processEvent() {
-            if (eventDataLines.length === 0) {
-              return;
-            }
-
-            const raw =
-              eventDataLines.join("\n").trim();
-
-            eventDataLines = [];
-
-            if (!raw || raw === "[DONE]") {
-              return;
-            }
-
-            let data;
-
-            try {
-              data = JSON.parse(raw);
-            } catch {
-              generatedContent += raw;
-
-              renderAIProgress(
-                generatedReasoning,
-                generatedContent
-              );
-
-              return;
-            }
-
-            if (data.error) {
-              throw new Error(
-                data.error.message ||
-                JSON.stringify(data.error)
-              );
-            }
-
-            const extracted =
-              extractStreamText(data);
-
-            generatedContent += extracted.content;
-            generatedReasoning += extracted.reasoning;
-
-            renderAIProgress(
-              generatedReasoning,
-              generatedContent
-            );
-          }
-
-          while (true) {
-            const { value, done } = await reader.read();
-
-            buffer += decoder.decode(
-              value || new Uint8Array(),
-              { stream: !done }
-            );
-
-            const lines = buffer.split(/\r?\n/);
-
-            buffer = done
-              ? ""
-              : lines.pop();
-
-            for (const line of lines) {
-              if (line === "") {
-                processEvent();
-                continue;
-              }
-
-              if (line.startsWith(":")) {
-                continue;
-              }
-
-              if (line.startsWith("data:")) {
-                eventDataLines.push(
-                  line.slice(5).replace(/^ /, "")
-                );
-              }
-            }
-
-            if (done) {
-              if (buffer.startsWith("data:")) {
-                eventDataLines.push(
-                  buffer.slice(5).replace(/^ /, "")
-                );
-              }
-
-              processEvent();
-              break;
-            }
-          }
-        }
-
-        if (!generatedContent.trim()) {
-          throw new Error(
-            "The API completed without returning structured output."
-          );
-        }
-
-        const descriptions =
-          parseDescriptionJSON(generatedContent);
-
-        showDescriptionOptions(descriptions);
 
         renderAIProgress(
           generatedReasoning,
           generatedContent
         );
+      } else {
+        if (!response.body) {
+          throw new Error("Streaming response has no body.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventDataLines = [];
+
+        function processEvent() {
+          if (eventDataLines.length === 0) {
+            return;
+          }
+
+          const raw = eventDataLines.join("\n").trim();
+          eventDataLines = [];
+
+          if (!raw || raw === "[DONE]") {
+            return;
+          }
+
+          let data;
+
+          try {
+            data = JSON.parse(raw);
+          } catch {
+            generatedContent += raw;
+            renderAIProgress(
+              generatedReasoning,
+              generatedContent
+            );
+            return;
+          }
+
+          if (data.error) {
+            throw new Error(
+              data.error.message || JSON.stringify(data.error)
+            );
+          }
+
+          const extracted = extractStreamText(data);
+          generatedContent += extracted.content;
+          generatedReasoning += extracted.reasoning;
+
+          renderAIProgress(
+            generatedReasoning,
+            generatedContent
+          );
+        }
+
+        while (true) {
+          const { value, done } = await reader.read();
+
+          buffer += decoder.decode(
+            value || new Uint8Array(),
+            { stream: !done }
+          );
+
+          const lines = buffer.split(/\r?\n/);
+          buffer = done ? "" : lines.pop();
+
+          for (const line of lines) {
+            if (line === "") {
+              processEvent();
+              continue;
+            }
+
+            if (line.startsWith(":")) {
+              continue;
+            }
+
+            if (line.startsWith("data:")) {
+              eventDataLines.push(
+                line.slice(5).replace(/^ /, "")
+              );
+            }
+          }
+
+          if (done) {
+            if (buffer.startsWith("data:")) {
+              eventDataLines.push(
+                buffer.slice(5).replace(/^ /, "")
+              );
+            }
+
+            processEvent();
+            break;
+          }
+        }
+      }
+
+      if (!generatedContent.trim()) {
+        throw new Error(
+          "The API completed without returning output."
+        );
+      }
+
+      renderAIProgress(
+        generatedReasoning,
+        generatedContent
+      );
+
+      return generatedContent.trim();
+    }
+
+    function validateAIConfig() {
+      const { endpoint, model } = getConfig();
+
+      if (!endpoint) {
+        alert("Configure the API endpoint first.");
+        return false;
+      }
+
+      if (!model) {
+        alert("Configure the model first.");
+        return false;
+      }
+
+      return true;
+    }
+
+    async function generateEnglishTitle() {
+      saveConfig(false);
+
+      if (!validateAIConfig()) {
+        return;
+      }
+
+      const title = titleInput.value.trim();
+
+      if (!title) {
+        alert("Enter a title first.");
+        return;
+      }
+
+      generateEnglishTitleButton.disabled = true;
+      generateEnglishTitleButton.textContent = "Translating...";
+
+      try {
+        const translation = await requestAI(
+          createTitleTranslationPrompt(title),
+          false
+        );
+
+        englishTitleInput.value = translation
+          .replace(/^```(?:text)?\s*/i, "")
+          .replace(/\s*```$/, "")
+          .replace(/^["“”]|["“”]$/g, "")
+          .trim();
       } catch (error) {
         console.error(error);
-
         aiProgress.style.display = "block";
-        aiProgress.textContent =
-          `Error:\n${error.message}`;
+        aiProgress.textContent = `Error:\n${error.message}`;
+      } finally {
+        generateEnglishTitleButton.disabled = false;
+        generateEnglishTitleButton.textContent =
+          "Translate with AI";
+      }
+    }
+
+    async function generateDescription() {
+      saveConfig(false);
+
+      if (!validateAIConfig()) {
+        return;
+      }
+
+      const body = contentInput.value;
+
+      if (!body.trim()) {
+        alert("Enter article content first.");
+        return;
+      }
+
+      generateDescriptionButton.disabled = true;
+      generateDescriptionButton.textContent = "Generating...";
+      descriptionOptions.style.display = "none";
+      descriptionOptionsList.replaceChildren();
+
+      try {
+        const generatedContent = await requestAI(
+          createPrompt(body),
+          true
+        );
+        const descriptions =
+          parseDescriptionJSON(generatedContent);
+
+        showDescriptionOptions(descriptions);
+      } catch (error) {
+        console.error(error);
+        aiProgress.style.display = "block";
+        aiProgress.textContent = `Error:\n${error.message}`;
       } finally {
         generateDescriptionButton.disabled = false;
         generateDescriptionButton.textContent =
@@ -1042,6 +1144,11 @@ ${body}`;
     generateButton.addEventListener(
       "click",
       generatePost
+    );
+
+    generateEnglishTitleButton.addEventListener(
+      "click",
+      generateEnglishTitle
     );
 
     generateDescriptionButton.addEventListener(
