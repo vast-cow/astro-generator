@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Astro Blog Post Generator</title>
+
+  <style>
+    body {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      font-family: sans-serif;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid #ccc;
+      margin-bottom: 20px;
+    }
+
+    .tab-button {
+      width: auto;
+      border: 0;
+      background: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+
+    .tab-button.active {
+      border-bottom-color: currentColor;
+      font-weight: bold;
+    }
+
+    .tab {
+      display: none;
+    }
+
+    .tab.active {
+      display: block;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+    }
+
+    input,
+    textarea,
+    button {
+      box-sizing: border-box;
+      width: 100%;
+      margin-top: 6px;
+      padding: 8px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+    }
+
+    #output {
+      min-height: 260px;
+      font-family: monospace;
+    }
+
+    .actions,
+    .field-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .field-actions input {
+      flex: 1;
+    }
+
+    .field-actions button {
+      width: auto;
+      white-space: nowrap;
+    }
+
+    #aiProgress {
+      display: none;
+      margin-top: 12px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-family: monospace;
+      max-height: 300px;
+      overflow: auto;
+    }
+
+    #descriptionOptions {
+      display: none;
+      margin-top: 12px;
+    }
+
+    .description-option {
+      display: flex;
+      align-items: start;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid #ccc;
+    }
+
+    .description-option-content {
+      flex: 1;
+    }
+
+    .description-rating {
+      margin-bottom: 4px;
+      font-size: 0.85em;
+      font-weight: bold;
+    }
+
+    .description-option button {
+      width: auto;
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    .hint,
+    .status {
+      font-size: 0.9em;
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Astro Blog Post Generator</h1>
+
+  <div class="tabs">
+    <button class="tab-button active" data-tab="blog" type="button">
+      Blog
+    </button>
+
+    <button class="tab-button" data-tab="config" type="button">
+      Config
+    </button>
+  </div>
+
+  <section id="blog" class="tab active">
+    <label for="title">Title</label>
+    <input id="title" type="text" placeholder="My Blog Post">
+
+    <label for="description">Description</label>
+
+    <div class="field-actions">
+      <input
+        id="description"
+        type="text"
+        placeholder="A short description of the post"
+      >
+
+      <button id="generateDescription" type="button">
+        Generate with AI
+      </button>
+    </div>
+
+    <div id="aiProgress"></div>
+
+    <div id="descriptionOptions">
+      <strong>Description options</strong>
+      <div id="descriptionOptionsList"></div>
+    </div>
+
+    <label for="date">Writing date and time</label>
+    <input id="date" type="datetime-local">
+
+    <label for="content">Content</label>
+    <textarea
+      id="content"
+      placeholder="Write your Markdown content here..."
+    ></textarea>
+
+    <button id="generate" type="button">
+      Generate
+    </button>
+
+    <label for="output">Generated output</label>
+    <textarea id="output" readonly></textarea>
+
+    <div class="actions">
+      <button id="copy" type="button">Copy</button>
+      <button id="download" type="button">Download .md</button>
+    </div>
+  </section>
+
+  <section id="config" class="tab">
+    <h2>OpenAI-compatible API</h2>
+
+    <label for="apiEndpoint">API endpoint</label>
+    <input
+      id="apiEndpoint"
+      type="url"
+      placeholder="https://api.openai.com/v1/chat/completions"
+    >
+
+    <p class="hint">
+      Enter the complete API endpoint, for example
+      /v1/chat/completions or /v1/responses.
+    </p>
+
+    <label for="apiKey">API key</label>
+    <input
+      id="apiKey"
+      type="password"
+      autocomplete="off"
+      placeholder="API key"
+    >
+
+    <label for="apiModel">Model</label>
+    <input
+      id="apiModel"
+      type="text"
+      placeholder="Model name"
+    >
+
+    <button id="saveConfig" type="button">
+      Save configuration
+    </button>
+
+    <p id="configStatus" class="status"></p>
+
+    <p class="hint">
+      Configuration is stored in localStorage for this page URL.
+    </p>
+  </section>
+
+  <script>
+    const titleInput = document.getElementById("title");
+    const descriptionInput = document.getElementById("description");
+    const dateInput = document.getElementById("date");
+    const contentInput = document.getElementById("content");
+    const output = document.getElementById("output");
+
+    const generateButton = document.getElementById("generate");
+    const copyButton = document.getElementById("copy");
+    const downloadButton = document.getElementById("download");
+
+    const generateDescriptionButton =
+      document.getElementById("generateDescription");
+
+    const aiProgress = document.getElementById("aiProgress");
+
+    const descriptionOptions =
+      document.getElementById("descriptionOptions");
+
+    const descriptionOptionsList =
+      document.getElementById("descriptionOptionsList");
+
+    const apiEndpointInput = document.getElementById("apiEndpoint");
+    const apiKeyInput = document.getElementById("apiKey");
+    const apiModelInput = document.getElementById("apiModel");
+    const saveConfigButton = document.getElementById("saveConfig");
+    const configStatus = document.getElementById("configStatus");
+
+    const PAGE_URL =
+      window.location.href.split("#")[0].split("?")[0];
+
+    const CONFIG_STORAGE_KEY =
+      `astro-blog-generator:${PAGE_URL}:config`;
+
+    function pad(number) {
+      return String(number).padStart(2, "0");
+    }
+
+    function toLocalInputValue(date) {
+      return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+      ].join("-") +
+        "T" +
+        [
+          pad(date.getHours()),
+          pad(date.getMinutes())
+        ].join(":");
+    }
+
+    function getTimezoneOffset(date) {
+      const offset = -date.getTimezoneOffset();
+      const sign = offset >= 0 ? "+" : "-";
+      const absolute = Math.abs(offset);
+
+      return (
+        `${sign}` +
+        `${pad(Math.floor(absolute / 60))}:` +
+        `${pad(absolute % 60)}`
+      );
+    }
+
+    function toZonedISOString(value) {
+      if (!value) {
+        return "";
+      }
+
+      const date = new Date(value);
+
+      return (
+        `${date.getFullYear()}-` +
+        `${pad(date.getMonth() + 1)}-` +
+        `${pad(date.getDate())}T` +
+        `${pad(date.getHours())}:` +
+        `${pad(date.getMinutes())}:` +
+        `${pad(date.getSeconds())}` +
+        getTimezoneOffset(date)
+      );
+    }
+
+    function escapeYaml(value) {
+      return String(value)
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n");
+    }
+
+    function getTitleFromContent(content) {
+      const firstNonEmptyLine = content
+        .split(/\r?\n/)
+        .find(line => line.trim() !== "");
+
+      if (!firstNonEmptyLine) {
+        return "";
+      }
+
+      const match =
+        firstNonEmptyLine.match(/^\s*#\s+(.+?)\s*$/);
+
+      return match ? match[1].trim() : "";
+    }
+
+    function generatePost() {
+      const content = contentInput.value;
+
+      let title = titleInput.value.trim();
+
+      if (!title) {
+        const headingTitle = getTitleFromContent(content);
+
+        if (headingTitle) {
+          title = headingTitle;
+          titleInput.value = headingTitle;
+        }
+      }
+
+      const description = descriptionInput.value.trim();
+      const date = toZonedISOString(dateInput.value);
+
+      const result = `---
+title: "${escapeYaml(title)}"
+description: "${escapeYaml(description)}"
+pubDate: ${date || '""'}
+---
+
+${content}`;
+
+      output.value = result;
+
+      return result;
+    }
+
+    function createFilename() {
+      const slug = titleInput.value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      return `${slug || "post"}.md`;
+    }
+
+    function loadConfig() {
+      try {
+        const saved =
+          JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
+
+        if (!saved) {
+          return;
+        }
+
+        apiEndpointInput.value = saved.endpoint || "";
+        apiKeyInput.value = saved.apiKey || "";
+        apiModelInput.value = saved.model || "";
+      } catch (error) {
+        console.error("Failed to load configuration:", error);
+      }
+    }
+
+    function getConfig() {
+      return {
+        endpoint: apiEndpointInput.value.trim(),
+        apiKey: apiKeyInput.value.trim(),
+        model: apiModelInput.value.trim()
+      };
+    }
+
+    function saveConfig(showStatus = true) {
+      const config = getConfig();
+
+      localStorage.setItem(
+        CONFIG_STORAGE_KEY,
+        JSON.stringify(config)
+      );
+
+      if (showStatus) {
+        configStatus.textContent = "Configuration saved.";
+
+        setTimeout(() => {
+          configStatus.textContent = "";
+        }, 2000);
+      }
+    }
+
+    function textValue(value) {
+      if (typeof value === "string") {
+        return value;
+      }
+
+      if (Array.isArray(value)) {
+        return value.map(textValue).join("");
+      }
+
+      if (value && typeof value === "object") {
+        if (typeof value.text === "string") {
+          return value.text;
+        }
+
+        if (typeof value.content === "string") {
+          return value.content;
+        }
+
+        if (typeof value.delta === "string") {
+          return value.delta;
+        }
+      }
+
+      return "";
+    }
+
+    function extractStreamText(data) {
+      let content = "";
+      let reasoning = "";
+
+      const choice = data.choices?.[0];
+
+      if (choice) {
+        const delta = choice.delta || {};
+
+        content += textValue(delta.content);
+
+        reasoning += textValue(
+          delta.reasoning_content ??
+          delta.reasoning ??
+          delta.thinking
+        );
+
+        if (!content && choice.message) {
+          content += textValue(choice.message.content);
+
+          reasoning += textValue(
+            choice.message.reasoning_content ??
+            choice.message.reasoning ??
+            choice.message.thinking
+          );
+        }
+      }
+
+      if (
+        data.type === "response.output_text.delta" &&
+        typeof data.delta === "string"
+      ) {
+        content += data.delta;
+      }
+
+      if (
+        (
+          data.type === "response.reasoning_text.delta" ||
+          data.type === "response.reasoning_summary_text.delta"
+        ) &&
+        typeof data.delta === "string"
+      ) {
+        reasoning += data.delta;
+      }
+
+      if (!choice && !data.type) {
+        content += textValue(data.content);
+
+        reasoning += textValue(
+          data.reasoning_content ??
+          data.reasoning ??
+          data.thinking
+        );
+      }
+
+      return {
+        content,
+        reasoning
+      };
+    }
+
+    const descriptionSchema = {
+      type: "object",
+      properties: {
+        descriptions: {
+          type: "array",
+          minItems: 3,
+          maxItems: 3,
+          items: {
+            type: "object",
+            properties: {
+              description: {
+                type: "string"
+              },
+              recommendation: {
+                type: "integer",
+                minimum: 1,
+                maximum: 5
+              }
+            },
+            required: [
+              "description",
+              "recommendation"
+            ],
+            additionalProperties: false
+          }
+        }
+      },
+      required: [
+        "descriptions"
+      ],
+      additionalProperties: false
+    };
+
+    function createPrompt(body) {
+      return `Generate exactly three alternative short descriptions for the following article.
+
+Requirements:
+- Detect the primary language of the article.
+- Write every description in the same language as the article.
+- Base the descriptions primarily on lines 2 and 3 of the article.
+- Do not repeat information that can already be inferred from the title.
+- Each description should stand on its own.
+- Keep each description concise.
+- Make the three alternatives meaningfully different in wording and emphasis.
+- For each description, assign a recommendation score from 1 to 5.
+- A score of 5 means it is the strongest candidate for use as the article description.
+- Evaluate the recommendation score based on clarity, informativeness, conciseness, and how well it avoids merely repeating the title.
+- It is allowed for multiple descriptions to have the same recommendation score.
+- Do not include explanations, commentary, Markdown, or reasoning in the final answer.
+- Return only valid JSON matching this structure:
+
+{
+  "descriptions": [
+    {
+      "description": "First description",
+      "recommendation": 5
+    },
+    {
+      "description": "Second description",
+      "recommendation": 4
+    },
+    {
+      "description": "Third description",
+      "recommendation": 3
+    }
+  ]
+}
+
+Article:
+
+----
+
+${body}`;
+    }
+
+    function createRequest(endpoint, model, prompt) {
+      const isResponsesAPI =
+        /\/responses\/?$/i.test(endpoint);
+
+      if (isResponsesAPI) {
+        return {
+          model,
+          input: prompt,
+          stream: true,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "article_descriptions",
+              strict: true,
+              schema: descriptionSchema
+            }
+          }
+        };
+      }
+
+      return {
+        model,
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        stream: true,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "article_descriptions",
+            strict: true,
+            schema: descriptionSchema
+          }
+        }
+      };
+    }
+
+    function renderAIProgress(reasoning, content) {
+      aiProgress.style.display = "block";
+
+      let text = "";
+
+      if (reasoning) {
+        text += `Reasoning / progress:\n${reasoning}`;
+      }
+
+      if (content) {
+        if (text) {
+          text += "\n\n";
+        }
+
+        text += `Structured output:\n${content}`;
+      }
+
+      if (!text) {
+        text = "Waiting for response...";
+      }
+
+      aiProgress.textContent = text;
+      aiProgress.scrollTop = aiProgress.scrollHeight;
+    }
+
+    function parseDescriptionJSON(text) {
+      let value = text.trim();
+
+      if (
+        value.startsWith("```json") ||
+        value.startsWith("```")
+      ) {
+        value = value
+          .replace(/^```(?:json)?\s*/i, "")
+          .replace(/\s*```$/, "");
+      }
+
+      let parsed;
+
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        throw new Error(
+          "The model response was not valid JSON."
+        );
+      }
+
+      if (
+        !parsed ||
+        !Array.isArray(parsed.descriptions) ||
+        parsed.descriptions.length !== 3
+      ) {
+        throw new Error(
+          "Expected exactly three description candidates."
+        );
+      }
+
+      return parsed.descriptions.map(item => {
+        if (
+          !item ||
+          typeof item.description !== "string" ||
+          !Number.isInteger(item.recommendation)
+        ) {
+          throw new Error(
+            "A description candidate has an invalid structure."
+          );
+        }
+
+        const description = item.description.trim();
+        const recommendation = item.recommendation;
+
+        if (!description) {
+          throw new Error(
+            "One or more generated descriptions were empty."
+          );
+        }
+
+        if (
+          recommendation < 1 ||
+          recommendation > 5
+        ) {
+          throw new Error(
+            "Recommendation must be between 1 and 5."
+          );
+        }
+
+        return {
+          description,
+          recommendation
+        };
+      });
+    }
+
+    function showDescriptionOptions(descriptions) {
+      descriptionOptionsList.replaceChildren();
+
+      const sortedDescriptions = [...descriptions].sort(
+        (a, b) => b.recommendation - a.recommendation
+      );
+
+      sortedDescriptions.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "description-option";
+
+        const content = document.createElement("div");
+        content.className = "description-option-content";
+
+        const rating = document.createElement("div");
+        rating.className = "description-rating";
+
+        rating.textContent =
+          `Recommendation Level: ${"★".repeat(item.recommendation)}` +
+          `${"☆".repeat(5 - item.recommendation)}` +
+          ` (${item.recommendation}/5)`;
+
+        const text = document.createElement("div");
+        text.textContent = item.description;
+
+        content.append(rating, text);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Use";
+
+        button.addEventListener("click", () => {
+          descriptionInput.value = item.description;
+        });
+
+        row.append(content, button);
+        descriptionOptionsList.append(row);
+      });
+
+      descriptionOptions.style.display = "block";
+
+      if (sortedDescriptions.length > 0) {
+        descriptionInput.value =
+          sortedDescriptions[0].description;
+      }
+    }
+
+    async function generateDescription() {
+      saveConfig(false);
+
+      const {
+        endpoint,
+        apiKey,
+        model
+      } = getConfig();
+
+      const body = contentInput.value;
+
+      if (!endpoint) {
+        alert("Configure the API endpoint first.");
+        return;
+      }
+
+      if (!model) {
+        alert("Configure the model first.");
+        return;
+      }
+
+      if (!body.trim()) {
+        alert("Enter article content first.");
+        return;
+      }
+
+      const prompt = createPrompt(body);
+
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream"
+      };
+
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
+
+      let generatedContent = "";
+      let generatedReasoning = "";
+
+      generateDescriptionButton.disabled = true;
+      generateDescriptionButton.textContent = "Generating...";
+
+      descriptionOptions.style.display = "none";
+      descriptionOptionsList.replaceChildren();
+
+      aiProgress.style.display = "block";
+      aiProgress.textContent = "Connecting...";
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(
+            createRequest(endpoint, model, prompt)
+          )
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+
+          throw new Error(
+            `API error ${response.status}: ${errorText}`
+          );
+        }
+
+        const contentType =
+          response.headers.get("content-type") || "";
+
+        if (!contentType.includes("text/event-stream")) {
+          const data = await response.json();
+
+          const extracted = extractStreamText(data);
+
+          generatedContent += extracted.content;
+          generatedReasoning += extracted.reasoning;
+
+          if (!generatedContent) {
+            generatedContent +=
+              textValue(data.choices?.[0]?.message?.content);
+          }
+
+          renderAIProgress(
+            generatedReasoning,
+            generatedContent
+          );
+        } else {
+          if (!response.body) {
+            throw new Error(
+              "Streaming response has no body."
+            );
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+
+          let buffer = "";
+          let eventDataLines = [];
+
+          function processEvent() {
+            if (eventDataLines.length === 0) {
+              return;
+            }
+
+            const raw =
+              eventDataLines.join("\n").trim();
+
+            eventDataLines = [];
+
+            if (!raw || raw === "[DONE]") {
+              return;
+            }
+
+            let data;
+
+            try {
+              data = JSON.parse(raw);
+            } catch {
+              generatedContent += raw;
+
+              renderAIProgress(
+                generatedReasoning,
+                generatedContent
+              );
+
+              return;
+            }
+
+            if (data.error) {
+              throw new Error(
+                data.error.message ||
+                JSON.stringify(data.error)
+              );
+            }
+
+            const extracted =
+              extractStreamText(data);
+
+            generatedContent += extracted.content;
+            generatedReasoning += extracted.reasoning;
+
+            renderAIProgress(
+              generatedReasoning,
+              generatedContent
+            );
+          }
+
+          while (true) {
+            const { value, done } = await reader.read();
+
+            buffer += decoder.decode(
+              value || new Uint8Array(),
+              { stream: !done }
+            );
+
+            const lines = buffer.split(/\r?\n/);
+
+            buffer = done
+              ? ""
+              : lines.pop();
+
+            for (const line of lines) {
+              if (line === "") {
+                processEvent();
+                continue;
+              }
+
+              if (line.startsWith(":")) {
+                continue;
+              }
+
+              if (line.startsWith("data:")) {
+                eventDataLines.push(
+                  line.slice(5).replace(/^ /, "")
+                );
+              }
+            }
+
+            if (done) {
+              if (buffer.startsWith("data:")) {
+                eventDataLines.push(
+                  buffer.slice(5).replace(/^ /, "")
+                );
+              }
+
+              processEvent();
+              break;
+            }
+          }
+        }
+
+        if (!generatedContent.trim()) {
+          throw new Error(
+            "The API completed without returning structured output."
+          );
+        }
+
+        const descriptions =
+          parseDescriptionJSON(generatedContent);
+
+        showDescriptionOptions(descriptions);
+
+        renderAIProgress(
+          generatedReasoning,
+          generatedContent
+        );
+      } catch (error) {
+        console.error(error);
+
+        aiProgress.style.display = "block";
+        aiProgress.textContent =
+          `Error:\n${error.message}`;
+      } finally {
+        generateDescriptionButton.disabled = false;
+        generateDescriptionButton.textContent =
+          "Generate with AI";
+      }
+    }
+
+    document.querySelectorAll(".tab-button")
+      .forEach(button => {
+        button.addEventListener("click", () => {
+          const selectedTab = button.dataset.tab;
+
+          document
+            .querySelectorAll(".tab-button")
+            .forEach(item => {
+              item.classList.toggle(
+                "active",
+                item === button
+              );
+            });
+
+          document
+            .querySelectorAll(".tab")
+            .forEach(tab => {
+              tab.classList.toggle(
+                "active",
+                tab.id === selectedTab
+              );
+            });
+        });
+      });
+
+    generateButton.addEventListener(
+      "click",
+      generatePost
+    );
+
+    generateDescriptionButton.addEventListener(
+      "click",
+      generateDescription
+    );
+
+    saveConfigButton.addEventListener(
+      "click",
+      () => saveConfig(true)
+    );
+
+    copyButton.addEventListener("click", async () => {
+      const text = output.value || generatePost();
+
+      await navigator.clipboard.writeText(text);
+
+      copyButton.textContent = "Copied";
+
+      setTimeout(() => {
+        copyButton.textContent = "Copy";
+      }, 1000);
+    });
+
+    downloadButton.addEventListener("click", () => {
+      const text = output.value || generatePost();
+
+      const blob = new Blob([text], {
+        type: "text/markdown;charset=utf-8"
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = createFilename();
+      link.click();
+
+      URL.revokeObjectURL(url);
+    });
+
+    dateInput.value = toLocalInputValue(new Date());
+
+    loadConfig();
+  </script>
+</body>
+</html>
