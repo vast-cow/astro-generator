@@ -6,17 +6,29 @@
   <title>Astro Blog Post Generator</title>
 
   <style>
+    :root {
+      color-scheme: light dark;
+      --page-background: #fff;
+      --text-color: #1f2328;
+      --surface-color: #f6f8fa;
+      --border-color: #d0d7de;
+      --muted-color: #59636e;
+      --accent-color: #0969da;
+    }
+
     body {
       max-width: 800px;
       margin: 40px auto;
       padding: 0 20px;
       font-family: sans-serif;
+      color: var(--text-color);
+      background-color: var(--page-background);
     }
 
     .tabs {
       display: flex;
       gap: 8px;
-      border-bottom: 1px solid #ccc;
+      border-bottom: 1px solid var(--border-color);
       margin-bottom: 20px;
     }
 
@@ -54,6 +66,9 @@
       margin-top: 6px;
       padding: 8px;
       font: inherit;
+      color: var(--text-color);
+      background-color: var(--surface-color);
+      border: 1px solid var(--border-color);
     }
 
     button {
@@ -89,7 +104,7 @@
       display: none;
       margin-top: 12px;
       padding: 10px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--border-color);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       font-family: monospace;
@@ -108,7 +123,7 @@
       gap: 8px;
       margin-top: 8px;
       padding: 8px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--border-color);
     }
 
     .description-option-content {
@@ -130,7 +145,22 @@
     .hint,
     .status {
       font-size: 0.9em;
-      color: #666;
+      color: var(--muted-color);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-background: #0d1117;
+        --text-color: #f0f6fc;
+        --surface-color: #161b22;
+        --border-color: #3d444d;
+        --muted-color: #aab8c5;
+        --accent-color: #58a6ff;
+      }
+    }
+
+    .tab-button.active {
+      border-bottom-color: var(--accent-color);
     }
   </style>
 </head>
