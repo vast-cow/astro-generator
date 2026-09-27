@@ -179,6 +179,15 @@
   </div>
 
   <section id="blog" class="tab active">
+    <label for="content">Content</label>
+    <textarea
+      id="content"
+      placeholder="Write your Markdown content here..."
+    ></textarea>
+
+    <label for="date">Writing date and time</label>
+    <input id="date" type="datetime-local">
+
     <label for="title">Title</label>
 
     <div class="field-actions">
@@ -226,8 +235,9 @@
       <div id="descriptionOptionsList"></div>
     </div>
 
-    <label for="date">Writing date and time</label>
-    <input id="date" type="datetime-local">
+    <button id="generate" type="button">
+      Generate
+    </button>
 
     <label for="filename">File name</label>
     <input
@@ -235,16 +245,6 @@
       type="text"
       placeholder="20260101-my-blog-post.md"
     >
-
-    <label for="content">Content</label>
-    <textarea
-      id="content"
-      placeholder="Write your Markdown content here..."
-    ></textarea>
-
-    <button id="generate" type="button">
-      Generate
-    </button>
 
     <label for="output">Generated output</label>
     <textarea id="output" readonly></textarea>
