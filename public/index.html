@@ -399,7 +399,7 @@
 
     function getTitleFromContent(content) {
       const match = content.match(
-        /^((?:[ \t]*\r?\n)*)([ \t]*#\s+(.+?)[ \t]*)(\r?\n|$)/
+        /^((?:[ \t]*\r?\n)*)([ \t]*#\s+(.+?)[ \t]*)(?:\r?\n(?:[ \t]*\r?\n)*|$)/
       );
 
       if (!match) {
