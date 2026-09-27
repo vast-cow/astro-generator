@@ -180,7 +180,14 @@
 
   <section id="blog" class="tab active">
     <label for="title">Title</label>
-    <input id="title" type="text" placeholder="My Blog Post">
+
+    <div class="field-actions">
+      <input id="title" type="text" placeholder="My Blog Post">
+
+      <button id="extractTitle" type="button">
+        Extract
+      </button>
+    </div>
 
     <label for="englishTitle">English title (used for filename)</label>
 
@@ -293,6 +300,9 @@
     const copyButton = document.getElementById("copy");
     const downloadButton = document.getElementById("download");
 
+    const extractTitleButton =
+      document.getElementById("extractTitle");
+
     const generateDescriptionButton =
       document.getElementById("generateDescription");
 
@@ -388,18 +398,23 @@
       return match ? match[1].trim() : "";
     }
 
+    function extractTitle() {
+      const title = getTitleFromContent(contentInput.value);
+
+      if (title) {
+        titleInput.value = title;
+      }
+
+      return title;
+    }
+
     function generatePost() {
       const content = contentInput.value;
 
       let title = titleInput.value.trim();
 
       if (!title) {
-        const headingTitle = getTitleFromContent(content);
-
-        if (headingTitle) {
-          title = headingTitle;
-          titleInput.value = headingTitle;
-        }
+        title = extractTitle();
       }
 
       const description = descriptionInput.value.trim();
@@ -1041,14 +1056,16 @@ ${title}
     async function generateEnglishTitle() {
       saveConfig(false);
 
-      if (!validateAIConfig()) {
+      const title = titleInput.value.trim() || extractTitle();
+
+      if (!title) {
+        alert(
+          "Enter a title or start the content with a # heading first."
+        );
         return;
       }
 
-      const title = titleInput.value.trim();
-
-      if (!title) {
-        alert("Enter a title first.");
+      if (!validateAIConfig()) {
         return;
       }
 
@@ -1144,6 +1161,11 @@ ${title}
     generateButton.addEventListener(
       "click",
       generatePost
+    );
+
+    extractTitleButton.addEventListener(
+      "click",
+      extractTitle
     );
 
     generateEnglishTitleButton.addEventListener(
