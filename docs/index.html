@@ -229,6 +229,13 @@
     <label for="date">Writing date and time</label>
     <input id="date" type="datetime-local">
 
+    <label for="filename">File name</label>
+    <input
+      id="filename"
+      type="text"
+      placeholder="20260101-my-blog-post.md"
+    >
+
     <label for="content">Content</label>
     <textarea
       id="content"
@@ -295,6 +302,7 @@
       document.getElementById("englishTitle");
     const descriptionInput = document.getElementById("description");
     const dateInput = document.getElementById("date");
+    const filenameInput = document.getElementById("filename");
     const contentInput = document.getElementById("content");
     const output = document.getElementById("output");
 
@@ -437,6 +445,7 @@ pubDate: ${date || '""'}
 ${content}`;
 
       output.value = result;
+      filenameInput.value = createFilename();
 
       return result;
     }
@@ -1226,7 +1235,7 @@ ${title}
       const link = document.createElement("a");
 
       link.href = url;
-      link.download = createFilename();
+      link.download = filenameInput.value.trim() || createFilename();
       link.click();
 
       URL.revokeObjectURL(url);
