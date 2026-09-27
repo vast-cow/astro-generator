@@ -390,39 +390,41 @@
     }
 
     function getTitleFromContent(content) {
-      const firstNonEmptyLine = content
-        .split(/\r?\n/)
-        .find(line => line.trim() !== "");
+      const match = content.match(
+        /^((?:[ \t]*\r?\n)*)([ \t]*#\s+(.+?)[ \t]*)(\r?\n|$)/
+      );
 
-      if (!firstNonEmptyLine) {
-        return "";
+      if (!match) {
+        return null;
       }
 
-      const match =
-        firstNonEmptyLine.match(/^\s*#\s+(.+?)\s*$/);
-
-      return match ? match[1].trim() : "";
+      return {
+        title: match[3].trim(),
+        content: match[1] + content.slice(match[0].length)
+      };
     }
 
     function extractTitle() {
-      const title = getTitleFromContent(contentInput.value);
+      const extraction = getTitleFromContent(contentInput.value);
 
-      if (title) {
-        titleInput.value = title;
+      if (!extraction) {
+        return "";
       }
 
-      return title;
+      titleInput.value = extraction.title;
+      contentInput.value = extraction.content;
+
+      return extraction.title;
     }
 
     function generatePost() {
-      const content = contentInput.value;
-
       let title = titleInput.value.trim();
 
       if (!title) {
         title = extractTitle();
       }
 
+      const content = contentInput.value;
       const description = descriptionInput.value.trim();
       const date = toZonedISOString(dateInput.value);
 
