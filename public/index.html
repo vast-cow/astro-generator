@@ -285,6 +285,19 @@
       placeholder="Model name"
     >
 
+    <label for="translationModel">Translation model (optional)</label>
+    <input
+      id="translationModel"
+      type="text"
+      placeholder="Uses Model when empty"
+      aria-describedby="translationModelHint"
+    >
+
+    <p id="translationModelHint" class="hint">
+      Leave empty to use Model for title translation.
+      Both models share the API endpoint and API key.
+    </p>
+
     <button id="saveConfig" type="button">
       Save configuration
     </button>
@@ -334,6 +347,8 @@
     const apiEndpointInput = document.getElementById("apiEndpoint");
     const apiKeyInput = document.getElementById("apiKey");
     const apiModelInput = document.getElementById("apiModel");
+    const translationModelInput =
+      document.getElementById("translationModel");
     const saveConfigButton = document.getElementById("saveConfig");
     const configStatus = document.getElementById("configStatus");
 
@@ -484,6 +499,7 @@ ${content}`;
         apiEndpointInput.value = saved.endpoint || "";
         apiKeyInput.value = saved.apiKey || "";
         apiModelInput.value = saved.model || "";
+        translationModelInput.value = saved.translationModel || "";
       } catch (error) {
         console.error("Failed to load configuration:", error);
       }
@@ -493,7 +509,8 @@ ${content}`;
       return {
         endpoint: apiEndpointInput.value.trim(),
         apiKey: apiKeyInput.value.trim(),
-        model: apiModelInput.value.trim()
+        model: apiModelInput.value.trim(),
+        translationModel: translationModelInput.value.trim()
       };
     }
 
@@ -889,13 +906,16 @@ ${title}
     async function requestAI(
       prompt,
       structuredOutput,
-      progressElement
+      progressElement,
+      modelOverride = null
     ) {
       const {
         endpoint,
         apiKey,
         model
       } = getConfig();
+
+      const selectedModel = modelOverride || model;
 
       const headers = {
         "Content-Type": "application/json",
@@ -918,7 +938,7 @@ ${title}
         body: JSON.stringify(
           createRequest(
             endpoint,
-            model,
+            selectedModel,
             prompt,
             structuredOutput
           )
@@ -1062,8 +1082,13 @@ ${title}
       return generatedContent.trim();
     }
 
-    function validateAIConfig() {
-      const { endpoint, model } = getConfig();
+    function getTranslationModel() {
+      const { model, translationModel } = getConfig();
+      return translationModel || model;
+    }
+
+    function validateAIConfig(model = getConfig().model) {
+      const { endpoint } = getConfig();
 
       if (!endpoint) {
         alert("Configure the API endpoint first.");
@@ -1090,7 +1115,9 @@ ${title}
         return;
       }
 
-      if (!validateAIConfig()) {
+      const translationModel = getTranslationModel();
+
+      if (!validateAIConfig(translationModel)) {
         return;
       }
 
@@ -1101,7 +1128,8 @@ ${title}
         const translation = await requestAI(
           createTitleTranslationPrompt(title),
           false,
-          englishTitleAIProgress
+          englishTitleAIProgress,
+          translationModel
         );
 
         englishTitleInput.value = translation

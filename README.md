@@ -75,7 +75,13 @@ not require an API.
    `https://api.openai.com/v1/chat/completions`.
 3. Enter an API key if the endpoint requires one.
 4. Enter the model name accepted by that provider.
-5. Select **Save configuration**.
+5. Optionally enter a **Translation model** for title translation. Leave it empty
+   to use **Model** for both AI features.
+6. Select **Save configuration**.
+
+Description generation always uses **Model**. Both models share the endpoint
+and API key, so the endpoint must support both. A translation model API error
+is displayed without retrying with the default model.
 
 Return to the **Blog** tab to use **Translate with AI** or **Generate with AI**.
 The provider must allow cross-origin requests from the page's origin and must
