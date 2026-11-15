@@ -28,8 +28,9 @@ Open <http://localhost:8000>.
    (default: `English`) and select **Translate**. When complete, copy the translated
    Markdown from **Output**. The original Blog and publication date stay unchanged.
 
-AI features send text directly to the configured provider and store configuration,
-including the API key, in browser localStorage. Basic post generation needs no API.
+All tab fields, including generated results and the API key, save automatically in
+browser localStorage for each page path and restore on reload. AI features send text
+directly to the configured provider. Basic post generation needs no API.
 
 See [usage, translation, and API configuration](docs/usage.md) for details and
 [development, testing, and deployment](docs/development.md) for maintenance guidance.

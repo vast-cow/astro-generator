@@ -47,8 +47,9 @@ The date-time offset is derived from the browser's local timezone.
 
 Title, description, and body are translated in that order with three separate
 streaming API requests. Each uses the target language and the configured
-**Translation model**, falling back to **Summary generation model** when it is empty. Both supported
-endpoint types work without requiring structured JSON output for translation.
+**Translation model**, falling back to **Summary generation model** when it is
+empty. Both supported endpoint types work without requiring structured JSON output
+for translation.
 
 Input must contain `---`-delimited YAML frontmatter with `title`, `description`,
 and `pubDatetime`. Text fields support plain, quoted, and literal/folded block
@@ -78,7 +79,8 @@ immediately. Select **Translate** to start again from Title without refreshing
 the page. Late responses from the cancelled run cannot overwrite the new run,
 and cancellation does not affect Blog's AI features.
 
-Translate's File name and Input start empty and remain independent of Blog.
+Translate's File name and Input start empty unless saved values are available,
+and remain independent of Blog.
 Switching tabs preserves both fields, translation results, and progress, including
 during an active translation. Editing or regenerating Blog does not affect
 Translate, and editing or translating in Translate does not affect Blog. Only
@@ -97,12 +99,15 @@ not require an API.
 3. Enter an API key if the endpoint requires one.
 4. Enter the **Summary generation model** name accepted by that provider.
 5. Optionally enter a **Translation model** for all translation requests. Leave
-   it empty to use **Summary generation model** for translations as well as descriptions.
-6. Select **Save configuration**.
+   it empty to use **Summary generation model** for translations as well as
+   descriptions.
 
-Description generation always uses **Summary generation model**. Both models share the endpoint
-and API key, so the endpoint must support both. A translation model API error
-is displayed without retrying with the default model.
+Configuration saves automatically as you edit; there is no Save configuration
+button.
+
+Description generation always uses **Summary generation model**. Both models share
+the endpoint and API key, so the endpoint must support both. A translation model
+API error is displayed without retrying with the default model.
 
 Return to the **Blog** tab to use **Translate with AI** or **Generate with AI**,
 or open **Translate** to translate a complete generated post.
@@ -110,12 +115,38 @@ The provider must allow cross-origin requests from the page's origin and must
 support the request format used by its selected endpoint. Structured JSON
 output support is required for description generation.
 
+## Automatic saving
+
+All fields in **Blog**, **Translate**, and **Config** save to browser `localStorage`
+as they change and restore when you reopen or reload the page. This includes
+extracted titles, AI-generated titles and descriptions, filenames, generated
+Markdown, and translation output, including partial streamed results. Clearing a
+field also saves its empty value. Without saved values, the writing date defaults
+to the current local time and Target language defaults to `English`.
+
+Each tab has its own record, scoped to the browser origin and page pathname:
+`astro-blog-generator:${location.pathname}:blog`,
+`astro-blog-generator:${location.pathname}:translate`, and
+`astro-blog-generator:${location.pathname}:config`. Different paths keep separate
+values; query strings and fragments do not change the storage scope. Previously
+saved configuration from the same page URL is migrated automatically when no
+valid configuration record exists for the new key.
+
+Restoration does not generate a post, copy Blog fields to Translate, or resume AI
+requests. Progress displays and request status are temporary; only field values
+are restored. **Copy from Blog** remains the explicit way to replace Translate's
+filename and input and clear its previous output.
+
+If storage is blocked, full, or contains invalid data, the application continues
+to work. Valid saved string fields are restored where possible; unavailable or
+invalid values keep their defaults. Changes cannot persist while storage is
+unavailable. Clear this page's localStorage records to discard saved fields.
+
 ### Security and privacy
 
-API configuration, including the API key, is stored in the browser's
-`localStorage` and scoped to the page URL. API requests are sent directly from
-the browser to the configured endpoint; this project does not include a proxy
-or backend.
+All tab fields, including article text and the API key, are stored in the browser's
+`localStorage` for the page path. API requests are sent directly from the browser
+to the configured endpoint; this project does not include a proxy or backend.
 
 Use a restricted, revocable key intended for client-side use. Do not use a
 privileged production key on a shared computer or a publicly accessible

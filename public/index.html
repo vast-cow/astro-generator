@@ -272,7 +272,7 @@
     <p id="translationInputHint" class="hint">
       Enter a file name and input, or select Copy from Blog to replace both with
       Blog's file name and generated output. These fields stay independent of Blog
-      and are preserved when switching tabs.
+      and are automatically saved across reloads.
     </p>
 
     <label for="targetLanguage">Target language</label>
@@ -337,14 +337,9 @@
       Both models share the API endpoint and API key.
     </p>
 
-    <button id="saveConfig" type="button">
-      Save configuration
-    </button>
-
-    <p id="configStatus" class="status"></p>
-
     <p class="hint">
-      Configuration is stored in localStorage for this page URL.
+      All Blog, Translate, and Config fields are automatically saved in
+      localStorage for this page path, including the API key.
     </p>
   </section>
 
@@ -402,14 +397,74 @@
     const apiModelInput = document.getElementById("apiModel");
     const translationModelInput =
       document.getElementById("translationModel");
-    const saveConfigButton = document.getElementById("saveConfig");
-    const configStatus = document.getElementById("configStatus");
 
-    const PAGE_URL =
-      window.location.href.split("#")[0].split("?")[0];
+    const STORAGE_PREFIX = `astro-blog-generator:${window.location.pathname}`;
+    const LEGACY_CONFIG_STORAGE_KEY =
+      `astro-blog-generator:${window.location.href.split("#")[0].split("?")[0]}:config`;
+    const tabFields = {
+      blog: {
+        content: contentInput,
+        date: dateInput,
+        title: titleInput,
+        englishTitle: englishTitleInput,
+        description: descriptionInput,
+        filename: filenameInput,
+        output
+      },
+      translate: {
+        translationFilename,
+        translationInput,
+        targetLanguage,
+        translationOutput
+      },
+      config: {
+        endpoint: apiEndpointInput,
+        apiKey: apiKeyInput,
+        model: apiModelInput,
+        translationModel: translationModelInput
+      }
+    };
 
-    const CONFIG_STORAGE_KEY =
-      `astro-blog-generator:${PAGE_URL}:config`;
+    function readStoredFields(key) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(key));
+        return saved && typeof saved === "object" && !Array.isArray(saved)
+          ? saved : null;
+      } catch (error) {
+        console.error("Failed to restore fields:", error);
+        return null;
+      }
+    }
+
+    // Programmatic value assignments also call this; they emit no input/change event.
+    function saveTabFields(tab) {
+      try {
+        const values = Object.fromEntries(
+          Object.entries(tabFields[tab]).map(([name, field]) => [name, field.value])
+        );
+        localStorage.setItem(`${STORAGE_PREFIX}:${tab}`, JSON.stringify(values));
+      } catch (error) {
+        // Storage may be blocked or full; editing and AI operations still work.
+        console.error("Failed to save fields:", error);
+      }
+    }
+
+    function restoreTabFields() {
+      for (const [tab, fields] of Object.entries(tabFields)) {
+        let saved = readStoredFields(`${STORAGE_PREFIX}:${tab}`);
+        const migrateConfig = tab === "config" && !saved;
+        if (migrateConfig) saved = readStoredFields(LEGACY_CONFIG_STORAGE_KEY);
+
+        for (const [name, field] of Object.entries(fields)) {
+          if (saved && Object.hasOwn(saved, name) && typeof saved[name] === "string") {
+            field.value = saved[name];
+          }
+          field.addEventListener("input", () => saveTabFields(tab));
+          field.addEventListener("change", () => saveTabFields(tab));
+        }
+        if (migrateConfig && saved) saveTabFields(tab);
+      }
+    }
 
     function pad(number) {
       return String(number).padStart(2, "0");
@@ -645,6 +700,7 @@
 
       titleInput.value = extraction.title;
       contentInput.value = extraction.content;
+      saveTabFields("blog");
 
       return extraction.title;
     }
@@ -670,6 +726,7 @@ ${content}`;
 
       output.value = result;
       filenameInput.value = createFilename();
+      saveTabFields("blog");
 
       return result;
     }
@@ -696,24 +753,6 @@ ${content}`;
       return `${datePrefix}-${slug || "post"}.md`;
     }
 
-    function loadConfig() {
-      try {
-        const saved =
-          JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY));
-
-        if (!saved) {
-          return;
-        }
-
-        apiEndpointInput.value = saved.endpoint || "";
-        apiKeyInput.value = saved.apiKey || "";
-        apiModelInput.value = saved.model || "";
-        translationModelInput.value = saved.translationModel || "";
-      } catch (error) {
-        console.error("Failed to load configuration:", error);
-      }
-    }
-
     function getConfig() {
       return {
         endpoint: apiEndpointInput.value.trim(),
@@ -721,23 +760,6 @@ ${content}`;
         model: apiModelInput.value.trim(),
         translationModel: translationModelInput.value.trim()
       };
-    }
-
-    function saveConfig(showStatus = true) {
-      const config = getConfig();
-
-      localStorage.setItem(
-        CONFIG_STORAGE_KEY,
-        JSON.stringify(config)
-      );
-
-      if (showStatus) {
-        configStatus.textContent = "Configuration saved.";
-
-        setTimeout(() => {
-          configStatus.textContent = "";
-        }, 2000);
-      }
     }
 
     function textValue(value) {
@@ -1111,6 +1133,7 @@ ${text}`;
 
         button.addEventListener("click", () => {
           descriptionInput.value = item.description;
+          saveTabFields("blog");
         });
 
         row.append(content, button);
@@ -1122,6 +1145,7 @@ ${text}`;
       if (sortedDescriptions.length > 0) {
         descriptionInput.value =
           sortedDescriptions[0].description;
+        saveTabFields("blog");
       }
     }
 
@@ -1370,6 +1394,7 @@ ${text}`;
 
       translationStatus.textContent = "";
       translationOutput.value = "";
+      saveTabFields("translate");
       for (const progress of Object.values(translationProgress)) {
         progress.textContent = "";
         progress.style.display = "none";
@@ -1379,7 +1404,6 @@ ${text}`;
         if (!language) throw new Error("Enter a target language.");
         document = parseTranslationDocument(translationInput.value);
         if (!validateAIConfig(model)) return;
-        saveConfig(false);
       } catch (error) {
         translationStatus.textContent = `Error: ${error.message}`;
         return;
@@ -1393,6 +1417,7 @@ ${text}`;
       let component;
       setTranslationRunning(true);
       translationOutput.value = reconstructTranslation(document, translated);
+      saveTabFields("translate");
       for (const progress of Object.values(translationProgress)) {
         progress.style.display = "block";
         progress.textContent = "Waiting...";
@@ -1412,6 +1437,7 @@ ${text}`;
               if (!isCurrentTranslation()) return;
               translated[component] = content;
               translationOutput.value = reconstructTranslation(document, translated);
+              saveTabFields("translate");
             },
             component === "body",
             signal
@@ -1419,6 +1445,7 @@ ${text}`;
           if (!isCurrentTranslation()) return;
           translated[component] = content;
           translationOutput.value = reconstructTranslation(document, translated);
+          saveTabFields("translate");
         }
         translationStatus.textContent = "Translation complete.";
       } catch (error) {
@@ -1434,8 +1461,6 @@ ${text}`;
     }
 
     async function generateEnglishTitle() {
-      saveConfig(false);
-
       const title = titleInput.value.trim() || extractTitle();
 
       if (!title) {
@@ -1467,6 +1492,7 @@ ${text}`;
           .replace(/\s*```$/, "")
           .replace(/^["“”]|["“”]$/g, "")
           .trim();
+        saveTabFields("blog");
       } catch (error) {
         console.error(error);
         englishTitleAIProgress.style.display = "block";
@@ -1480,8 +1506,6 @@ ${text}`;
     }
 
     async function generateDescription() {
-      saveConfig(false);
-
       if (!validateAIConfig()) {
         return;
       }
@@ -1558,6 +1582,7 @@ ${text}`;
       translationFilename.value = filenameInput.value;
       translationInput.value = output.value;
       translationOutput.value = "";
+      saveTabFields("translate");
       translationStatus.textContent = "";
       for (const progress of Object.values(translationProgress)) {
         progress.style.display = "none";
@@ -1578,11 +1603,6 @@ ${text}`;
     generateDescriptionButton.addEventListener(
       "click",
       generateDescription
-    );
-
-    saveConfigButton.addEventListener(
-      "click",
-      () => saveConfig(true)
     );
 
     copyButton.addEventListener("click", async () => {
@@ -1616,7 +1636,7 @@ ${text}`;
 
     dateInput.value = toLocalInputValue(new Date());
 
-    loadConfig();
+    restoreTabFields();
   </script>
 </body>
 </html>
