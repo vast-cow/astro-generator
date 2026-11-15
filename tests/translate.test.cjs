@@ -120,24 +120,96 @@ function streamed(content, responses = false) {
   }), { headers: { "Content-Type": "text/event-stream" } });
 }
 
-test("opening Translate copies Blog values, allows edits, and refreshes on reopening", () => {
+test("tabs are ordered Blog, Translate, Config with Blog active by default", () => {
+  const { elements, buttons } = app();
+  assert.deepEqual(buttons.map(button => button.dataset.tab), ["blog", "translate", "config"]);
+  for (const button of buttons) {
+    const isBlog = button.dataset.tab === "blog";
+    assert.equal(button.classList.contains("active"), isBlog);
+    assert.equal(elements[button.dataset.tab].classList.contains("active"), isBlog);
+  }
+  for (const button of buttons) {
+    button.click();
+    for (const other of buttons) {
+      assert.equal(other.classList.contains("active"), other === button);
+      assert.equal(elements[other.dataset.tab].classList.contains("active"), other === button);
+    }
+  }
+});
+
+test("Translate fields are editable, independent, and preserved across tab switches and Blog generation", () => {
   const instance = app();
   const { elements, buttons } = instance;
   elements.output.value = original;
   elements.filename.value = "20261115-original.md";
-  buttons[2].click();
-  assert.equal(elements.translationFilename.value, elements.filename.value);
-  assert.equal(elements.translationInput.value, original);
+  buttons[1].click();
+  assert.equal(elements.translationFilename.value, "");
+  assert.equal(elements.translationInput.value, "");
+  assert.equal(elements.translationFilename.readOnly, false);
   assert.equal(elements.translationInput.readOnly, false);
   assert.equal(elements.targetLanguage.value, "English");
+  elements.translationFilename.value = "manual-name.md";
   elements.translationInput.value = "Edited copy";
-  buttons[2].click();
-  assert.equal(elements.translationInput.value, "Edited copy");
+  assert.equal(elements.filename.value, "20261115-original.md");
   assert.equal(elements.output.value, original);
   buttons[0].click();
-  elements.output.value = "New generated document";
-  buttons[2].click();
-  assert.equal(elements.translationInput.value, "New generated document");
+  elements.content.value = "New Blog content";
+  elements.title.value = "New title";
+  elements.englishTitle.value = "New post";
+  elements.description.value = "New description";
+  elements.date.value = "2026-11-15T09:30";
+  elements.generate.click();
+  assert.equal(elements.filename.value, "20261115-new-post.md");
+  assert.match(elements.output.value, /New Blog content/);
+  for (const index of [1, 2, 1, 0, 1, 1]) {
+    buttons[index].click();
+    assert.equal(elements.translationFilename.value, "manual-name.md");
+    assert.equal(elements.translationInput.value, "Edited copy");
+  }
+});
+
+test("Copy from Blog replaces both fields only on click, without changing Blog or starting translation", () => {
+  const { elements, buttons } = app();
+  elements.filename.value = "20261115-original.md";
+  elements.output.value = original;
+  elements.translationFilename.value = "manual-name.md";
+  elements.translationInput.value = "Manual input";
+  elements.translationOutput.value = "Previous translation";
+  elements.translationStatus.textContent = "Translation complete.";
+  for (const id of ["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]) {
+    elements[id].textContent = "Previous progress";
+    elements[id].style.display = "block";
+  }
+  buttons[1].click();
+  assert.equal(elements.translationInput.value, "Manual input");
+  elements.copyFromBlog.click();
+  assert.equal(elements.translationFilename.value, "20261115-original.md");
+  assert.equal(elements.translationInput.value, original);
+  assert.equal(elements.filename.value, "20261115-original.md");
+  assert.equal(elements.output.value, original);
+  assert.equal(elements.translationOutput.value, "");
+  assert.equal(elements.translationStatus.textContent, "");
+  assert.equal(elements.translatePost.disabled, false);
+  for (const id of ["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]) {
+    assert.equal(elements[id].textContent, "");
+    assert.equal(elements[id].style.display, "none");
+  }
+  elements.filename.value = "updated-blog.md";
+  elements.output.value = "Updated Blog output";
+  buttons[0].click();
+  buttons[1].click();
+  assert.equal(elements.translationFilename.value, "20261115-original.md");
+  assert.equal(elements.translationInput.value, original);
+  elements.copyFromBlog.click();
+  assert.equal(elements.translationFilename.value, "updated-blog.md");
+  assert.equal(elements.translationInput.value, "Updated Blog output");
+  assert.equal(elements.filename.value, "updated-blog.md");
+  assert.equal(elements.output.value, "Updated Blog output");
+  elements.filename.value = "";
+  elements.output.value = "";
+  elements.copyFromBlog.click();
+  assert.equal(elements.translationFilename.value, "");
+  assert.equal(elements.translationInput.value, "");
 });
 
 test("frontmatter replacement preserves every other field, Markdown, comments, and CRLF", () => {
@@ -200,8 +272,11 @@ for (const endpoint of ["chat/completions", "responses"]) {
     const instance = app();
     const { elements, context } = instance;
     configure(instance, endpoint, endpoint === "responses" ? "" : "translator");
+    elements.filename.value = "blog-name.md";
     elements.output.value = original;
+    elements.translationFilename.value = "manual-translation.md";
     elements.translationInput.value = original.replace("Original title", "Edited title").replace("## Heading", "## Edited heading");
+    const input = elements.translationInput.value;
     elements.targetLanguage.value = "Brazilian Portuguese";
     const calls = [];
     let bodyController;
@@ -242,6 +317,16 @@ for (const endpoint of ["chat/completions", "responses"]) {
     const translating = elements.translatePost.click();
     await bodyReady;
     assert.equal(elements.translatePost.disabled, true);
+    assert.equal(elements.copyFromBlog.disabled, true);
+    assert.equal(elements.translationInput.readOnly, true);
+    assert.equal(elements.translationFilename.readOnly, false);
+    elements.translationFilename.value = "renamed-during-translation.md";
+    elements.copyFromBlog.click();
+    instance.buttons[0].click();
+    instance.buttons[2].click();
+    instance.buttons[1].click();
+    assert.equal(elements.translationInput.value, input);
+    assert.equal(elements.translationFilename.value, "renamed-during-translation.md");
     bodyController.enqueue(encoder.encode(event("\n## Traduzido", endpoint === "responses")));
     await new Promise(resolve => setImmediate(resolve));
     assert.match(elements.translationBodyProgress.textContent, /## Traduzido/);
@@ -255,10 +340,24 @@ for (const endpoint of ["chat/completions", "responses"]) {
     assert.equal(calls.length, 3);
     assert.equal(elements.translationStatus.textContent, "Translation complete.");
     assert.equal(elements.translatePost.disabled, false);
+    assert.equal(elements.copyFromBlog.disabled, false);
     assert.equal(elements.translationInput.readOnly, false);
+    assert.equal(elements.translationFilename.value, "renamed-during-translation.md");
+    assert.equal(elements.translationInput.value, input);
     assert.ok(elements.translationOutput.value.endsWith("\n## Traduzido" + remainder));
     assert.ok(elements.translationOutput.value.includes(original.slice(original.indexOf("pubDatetime:"), original.indexOf("---\n\n"))));
     assert.equal(elements.output.value, original);
+    assert.equal(elements.filename.value, "blog-name.md");
+    const translatedOutput = elements.translationOutput.value;
+    const titleProgress = elements.translationTitleProgress.textContent;
+    instance.buttons[0].click();
+    instance.buttons[2].click();
+    instance.buttons[1].click();
+    assert.equal(elements.translationFilename.value, "renamed-during-translation.md");
+    assert.equal(elements.translationInput.value, input);
+    assert.equal(elements.translationOutput.value, translatedOutput);
+    assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    assert.equal(elements.translationTitleProgress.textContent, titleProgress);
   });
 }
 
@@ -275,6 +374,7 @@ test("errors retain partial output, identify the component, and allow retry", as
   assert.match(instance.elements.translationOutput.value, /Translated title/);
   assert.equal(requests, 2);
   assert.equal(instance.elements.translatePost.disabled, false);
+  assert.equal(instance.elements.copyFromBlog.disabled, false);
   assert.equal(instance.elements.translationInput.readOnly, false);
   instance.context.fetch = async () => streamed("Retried");
   await instance.elements.translatePost.click();

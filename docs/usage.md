@@ -29,12 +29,14 @@ The date-time offset is derived from the browser's local timezone.
 
 ## Translate a post
 
-1. Generate a post in **Blog** and configure the API in **Config**.
-2. Open **Translate**. **File name** and **Input** are copied from the current
-   Blog filename and Generated output. Input is an editable copy; changing or
-   translating it never changes the Blog tab.
-3. Edit **Input** if needed. Translation uses these edits, including any edits
-   to the title, description, or article body.
+1. Configure the API in **Config**. To use a Blog post as the source, generate it
+   in **Blog** first.
+2. Open **Translate**. Enter **File name** and **Input** manually, or select
+   **Copy from Blog** to replace both with Blog's current File name and Generated
+   output. Copying does not change Blog or start a translation.
+3. Edit **File name** and **Input** as needed. Translation uses Translate's own
+   Input, including any edits to the title, description, or article body. Your
+   manually entered filename is preserved when translating.
 4. Enter any language name in **Target language** (default: `English`), such as
    `Japanese` or `Brazilian Portuguese`.
 5. Select **Translate**. Follow the separate **Title**, **Description**, and
@@ -63,11 +65,16 @@ Output updates during each stream. Components that have not started retain
 their original text, so wait for completion before using the document. If a
 request fails, the status identifies the component and marks Output incomplete;
 partial results remain visible. Correct the issue and select Translate to retry
-all three requests. Input and target language are locked only while translating.
+all three requests. Input and target language are locked only while translating;
+Copy from Blog is also disabled until the request finishes. File name remains
+editable.
 
-Switching back into Translate refreshes its source from Blog and clears prior
-results. Clicking the already active Translate tab preserves your edits. Returning
-during an active translation preserves that request and its input.
+Translate's File name and Input start empty and remain independent of Blog.
+Switching tabs preserves both fields, translation results, and progress, including
+during an active translation. Editing or regenerating Blog does not affect
+Translate, and editing or translating in Translate does not affect Blog. Only
+selecting **Copy from Blog** replaces Translate's fields with Blog's current
+values and clears prior translation results and progress.
 
 ## AI configuration
 

@@ -175,12 +175,12 @@
       Blog
     </button>
 
-    <button class="tab-button" data-tab="config" type="button">
-      Config
-    </button>
-
     <button class="tab-button" data-tab="translate" type="button">
       Translate
+    </button>
+
+    <button class="tab-button" data-tab="config" type="button">
+      Config
     </button>
   </div>
 
@@ -262,14 +262,17 @@
   </section>
 
   <section id="translate" class="tab">
+    <button id="copyFromBlog" type="button">Copy from Blog</button>
+
     <label for="translationFilename">File name</label>
-    <input id="translationFilename" type="text" readonly>
+    <input id="translationFilename" type="text">
 
     <label for="translationInput">Input</label>
     <textarea id="translationInput" aria-describedby="translationInputHint"></textarea>
     <p id="translationInputHint" class="hint">
-      Copied from Blog when opening this tab. Edit this copy before translating.
-      Your original Blog content is unchanged.
+      Enter a file name and input, or select Copy from Blog to replace both with
+      Blog's file name and generated output. These fields stay independent of Blog
+      and are preserved when switching tabs.
     </p>
 
     <label for="targetLanguage">Target language</label>
@@ -355,6 +358,7 @@
     const output = document.getElementById("output");
     const translationFilename = document.getElementById("translationFilename");
     const translationInput = document.getElementById("translationInput");
+    const copyFromBlogButton = document.getElementById("copyFromBlog");
     const targetLanguage = document.getElementById("targetLanguage");
     const translatePostButton = document.getElementById("translatePost");
     const translationStatus = document.getElementById("translationStatus");
@@ -1352,6 +1356,7 @@ ${text}`;
       let component;
       translatePostButton.disabled = true;
       translatePostButton.textContent = "Translating...";
+      copyFromBlogButton.disabled = true;
       translationInput.readOnly = true;
       targetLanguage.disabled = true;
       translationOutput.value = reconstructTranslation(document, translated);
@@ -1384,6 +1389,7 @@ ${text}`;
       } finally {
         translatePostButton.disabled = false;
         translatePostButton.textContent = "Translate";
+        copyFromBlogButton.disabled = false;
         translationInput.readOnly = false;
         targetLanguage.disabled = false;
       }
@@ -1481,18 +1487,6 @@ ${text}`;
         button.addEventListener("click", () => {
           const selectedTab = button.dataset.tab;
 
-          if (selectedTab === "translate" &&
-              !button.classList.contains("active") && !translatePostButton.disabled) {
-            translationFilename.value = filenameInput.value;
-            translationInput.value = output.value;
-            translationOutput.value = "";
-            translationStatus.textContent = "";
-            for (const progress of Object.values(translationProgress)) {
-              progress.style.display = "none";
-              progress.textContent = "";
-            }
-          }
-
           document
             .querySelectorAll(".tab-button")
             .forEach(item => {
@@ -1519,6 +1513,18 @@ ${text}`;
     );
 
     translatePostButton.addEventListener("click", translatePost);
+
+    copyFromBlogButton.addEventListener("click", () => {
+      if (copyFromBlogButton.disabled) return;
+      translationFilename.value = filenameInput.value;
+      translationInput.value = output.value;
+      translationOutput.value = "";
+      translationStatus.textContent = "";
+      for (const progress of Object.values(translationProgress)) {
+        progress.style.display = "none";
+        progress.textContent = "";
+      }
+    });
 
     extractTitleButton.addEventListener(
       "click",

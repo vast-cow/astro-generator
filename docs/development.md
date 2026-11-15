@@ -30,10 +30,11 @@ node --test tests/translate.test.cjs
 ```
 
 The tests run the application script with a minimal DOM fixture and mock API
-responses. They cover tab initialization and edits, source-preserving frontmatter
-replacement, three independent requests, both endpoint formats, partial streaming
-updates, errors and retries, model selection, and existing Blog features. Tests do
-not call an external provider or require credentials.
+responses. They cover tab order, independent Translate fields, explicit copying
+from Blog, edits preserved across tab switches and translation, source-preserving
+frontmatter replacement, three independent requests, both endpoint formats,
+partial streaming updates, errors and retries, model selection, and existing Blog
+features. Tests do not call an external provider or require credentials.
 
 After making changes, serve `public/` locally and verify:
 
@@ -41,8 +42,8 @@ After making changes, serve `public/` locally and verify:
 - filename normalization and local date handling;
 - clipboard and file download actions;
 - light and dark color schemes;
-- Translate input handoff, manual edits, per-component streaming progress,
-  reconstructed output, and error states; and
+- explicit Copy from Blog, independent filename and input edits, tab switching,
+  per-component streaming progress, reconstructed output, and error states; and
 - AI requests against each supported endpoint type, when credentials are
   available.
 

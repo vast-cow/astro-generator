@@ -22,11 +22,11 @@ Open <http://localhost:8000>.
    filename, and a description. Select **Generate**, then **Copy** or **Download .md**.
 2. To use AI features, enter the endpoint, key, and model in **Config**. An optional
    **Translation model** overrides **Model** for translations.
-3. Open **Translate** to copy the current Blog filename and generated document.
-   Edit **Input**, enter a **Target language** (default: `English`), and select
-   **Translate**. Title, description, and body stream separately into **Output**;
-   the publication date and other metadata stay unchanged. Wait for completion,
-   then copy the translated Markdown from Output. The original Blog is unchanged.
+3. In **Translate**, enter **File name** and **Input**, or select **Copy from Blog**
+   to copy the current Blog filename and generated document. These fields stay
+   independent and persist when switching tabs. Enter a **Target language**
+   (default: `English`) and select **Translate**. When complete, copy the translated
+   Markdown from **Output**. The original Blog and publication date stay unchanged.
 
 AI features send text directly to the configured provider and store configuration,
 including the API key, in browser localStorage. Basic post generation needs no API.
