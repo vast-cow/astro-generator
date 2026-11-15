@@ -21,7 +21,7 @@ Open <http://localhost:8000>.
 1. In **Blog**, enter Markdown, a writing date, a title, an English title for the
    filename, and a description. Select **Generate**, then **Copy** or **Download .md**.
 2. To use AI features, enter the endpoint, key, and model in **Config**. An optional
-   **Translation model** overrides **Model** for translations.
+   **Translation model** overrides **Summary generation model** for translations.
 3. In **Translate**, enter **File name** and **Input**, or select **Copy from Blog**
    to copy the current Blog filename and generated document. These fields stay
    independent and persist when switching tabs. Enter a **Target language**

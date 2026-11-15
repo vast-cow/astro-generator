@@ -47,7 +47,7 @@ The date-time offset is derived from the browser's local timezone.
 
 Title, description, and body are translated in that order with three separate
 streaming API requests. Each uses the target language and the configured
-**Translation model**, falling back to **Model** when it is empty. Both supported
+**Translation model**, falling back to **Summary generation model** when it is empty. Both supported
 endpoint types work without requiring structured JSON output for translation.
 
 Input must contain `---`-delimited YAML frontmatter with `title`, `description`,
@@ -95,12 +95,12 @@ not require an API.
    `https://api.openai.com/v1/responses` or
    `https://api.openai.com/v1/chat/completions`.
 3. Enter an API key if the endpoint requires one.
-4. Enter the model name accepted by that provider.
+4. Enter the **Summary generation model** name accepted by that provider.
 5. Optionally enter a **Translation model** for all translation requests. Leave
-   it empty to use **Model** for translations as well as descriptions.
+   it empty to use **Summary generation model** for translations as well as descriptions.
 6. Select **Save configuration**.
 
-Description generation always uses **Model**. Both models share the endpoint
+Description generation always uses **Summary generation model**. Both models share the endpoint
 and API key, so the endpoint must support both. A translation model API error
 is displayed without retrying with the default model.
 
