@@ -35,7 +35,8 @@ function element(attributes = "") {
   return {
     value: attributes.match(/value="([^"]*)"/)?.[1] || "",
     readOnly: /\breadonly\b/.test(attributes),
-    disabled: false,
+    disabled: /\bdisabled\b/.test(attributes),
+    hidden: /\bhidden\b/.test(attributes),
     textContent: "",
     style: {},
     dataset: { tab: attributes.match(/data-tab="([^"]*)"/)?.[1] },
@@ -78,7 +79,7 @@ function app() {
     },
     navigator: { clipboard: { writeText: async text => copied.push(text) } },
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
-    Blob, TextDecoder, Uint8Array,
+    Blob, TextDecoder, Uint8Array, AbortController,
     localStorage: {
       getItem: key => storage.get(key) || null,
       setItem: (key, value) => storage.set(key, value)
@@ -120,6 +121,26 @@ function streamed(content, responses = false) {
   }), { headers: { "Content-Type": "text/event-stream" } });
 }
 
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function assertTranslationIdle(elements) {
+  assert.equal(elements.translatePost.disabled, false);
+  assert.equal(elements.translatePost.textContent, "Translate");
+  assert.equal(elements.cancelTranslation.hidden, true);
+  assert.equal(elements.cancelTranslation.disabled, true);
+  assert.equal(elements.copyFromBlog.disabled, false);
+  assert.equal(elements.translationInput.readOnly, false);
+  assert.equal(elements.targetLanguage.disabled, false);
+  assert.equal(elements.translationFilename.readOnly, false);
+}
+
 test("tabs are ordered Blog, Translate, Config with Blog active by default", () => {
   const { elements, buttons } = app();
   assert.deepEqual(buttons.map(button => button.dataset.tab), ["blog", "translate", "config"]);
@@ -147,6 +168,8 @@ test("Translate fields are editable, independent, and preserved across tab switc
   assert.equal(elements.translationInput.value, "");
   assert.equal(elements.translationFilename.readOnly, false);
   assert.equal(elements.translationInput.readOnly, false);
+  assert.equal(elements.cancelTranslation.hidden, true);
+  assert.equal(elements.cancelTranslation.disabled, true);
   assert.equal(elements.targetLanguage.value, "English");
   elements.translationFilename.value = "manual-name.md";
   elements.translationInput.value = "Edited copy";
@@ -264,6 +287,8 @@ test("invalid frontmatter and unsupported text values fail before making request
     await instance.elements.translatePost.click();
     assert.match(instance.elements.translationStatus.textContent, /^Error:/);
     assert.equal(instance.elements.translatePost.disabled, false);
+    assert.equal(instance.elements.cancelTranslation.hidden, true);
+    assert.equal(instance.elements.cancelTranslation.disabled, true);
   }
 });
 
@@ -317,6 +342,8 @@ for (const endpoint of ["chat/completions", "responses"]) {
     const translating = elements.translatePost.click();
     await bodyReady;
     assert.equal(elements.translatePost.disabled, true);
+    assert.equal(elements.cancelTranslation.hidden, false);
+    assert.equal(elements.cancelTranslation.disabled, false);
     assert.equal(elements.copyFromBlog.disabled, true);
     assert.equal(elements.translationInput.readOnly, true);
     assert.equal(elements.translationFilename.readOnly, false);
@@ -339,6 +366,7 @@ for (const endpoint of ["chat/completions", "responses"]) {
     await translating;
     assert.equal(calls.length, 3);
     assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    assertTranslationIdle(elements);
     assert.equal(elements.translatePost.disabled, false);
     assert.equal(elements.copyFromBlog.disabled, false);
     assert.equal(elements.translationInput.readOnly, false);
@@ -361,6 +389,207 @@ for (const endpoint of ["chat/completions", "responses"]) {
   });
 }
 
+for (const endpoint of ["chat/completions", "responses"]) {
+  for (const [index, component] of ["title", "description", "body"].entries()) {
+    test(`${endpoint}: cancel during ${component} stops the stream, retains output, and allows retry`, async () => {
+      const instance = app();
+      const { elements, context } = instance;
+      configure(instance, endpoint);
+      elements.translationInput.value = original;
+      elements.translationFilename.value = "translation.md";
+      const signals = [];
+      let streamCancelled = false;
+      const responses = endpoint === "responses";
+      context.fetch = async (_, options) => {
+        signals.push(options.signal);
+        if (signals.length <= index) return streamed(`Completed ${signals.length}`, responses);
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(event(`Partial ${component}`, responses)));
+          },
+          cancel() { streamCancelled = true; }
+        }), { headers: { "Content-Type": "text/event-stream" } });
+      };
+
+      const translating = elements.translatePost.click();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(signals.length, index + 1);
+      assert.equal(elements.translationStatus.textContent, `Translating ${component}...`);
+      assert.match(elements.translationOutput.value, new RegExp(`Partial ${component}`));
+      assert.equal(elements.cancelTranslation.hidden, false);
+      assert.equal(elements.cancelTranslation.disabled, false);
+      const partialOutput = elements.translationOutput.value;
+      const progress = ["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]
+        .map(id => elements[id].textContent);
+
+      elements.cancelTranslation.click();
+      // Controls recover synchronously, before the aborted request settles.
+      assertTranslationIdle(elements);
+      assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
+      assert.equal(elements.translationFilename.value, "translation.md");
+      assert.ok(signals.every(signal => signal === signals[0] && signal.aborted));
+      assert.equal(streamCancelled, true);
+      await translating;
+      assert.equal(signals.length, index + 1);
+      assert.equal(elements.translationOutput.value, partialOutput);
+      assert.deepEqual(["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]
+        .map(id => elements[id].textContent), progress);
+      assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
+
+      let retriedRequests = 0;
+      context.fetch = async (_, options) => {
+        retriedRequests++;
+        assert.notEqual(options.signal, signals[0]);
+        assert.equal(options.signal.aborted, false);
+        return streamed(`Retry ${retriedRequests}`, responses);
+      };
+      await elements.translatePost.click();
+      assert.equal(retriedRequests, 3);
+      assert.equal(elements.translationStatus.textContent, "Translation complete.");
+      assert.match(elements.translationOutput.value, /title: "Retry 1"/);
+      assert.match(elements.translationOutput.value, /description: "Retry 2"/);
+      assert.ok(elements.translationOutput.value.endsWith("Retry 3"));
+      assertTranslationIdle(elements);
+      elements.cancelTranslation.click();
+      assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    });
+  }
+}
+
+test("cancelling while connecting aborts fetch without displaying an API error", async () => {
+  const instance = app();
+  const { elements, context } = instance;
+  configure(instance);
+  elements.translationInput.value = original;
+  let signal;
+  let requests = 0;
+  context.fetch = (_, options) => new Promise((resolve, reject) => {
+    requests++;
+    signal = options.signal;
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  const translating = elements.translatePost.click();
+  assert.equal(elements.translationTitleProgress.textContent, "Connecting...");
+  assert.equal(elements.cancelTranslation.hidden, false);
+  elements.cancelTranslation.click();
+  assert.equal(signal.aborted, true);
+  assertTranslationIdle(elements);
+  await translating;
+  assert.equal(requests, 1);
+  assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
+  assert.equal(elements.translationTitleProgress.textContent, "Connecting...");
+  assert.equal(elements.translationOutput.value, original);
+});
+
+for (const lateResult of ["stream", "JSON", "error"]) {
+  test(`late ${lateResult} from a cancelled translation cannot modify a new running translation`, async () => {
+    const instance = app();
+    const { elements, context } = instance;
+    configure(instance);
+    elements.translationInput.value = original;
+    const late = deferred();
+    let oldSignal;
+    let oldRequests = 0;
+    context.fetch = async (_, options) => {
+      oldRequests++;
+      oldSignal = options.signal;
+      // Simulate a provider that ignores abort, including a pending JSON body.
+      return lateResult === "JSON" ? {
+        ok: true,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        json: () => late.promise
+      } : late.promise;
+    };
+    const cancelledRun = elements.translatePost.click();
+    await new Promise(resolve => setImmediate(resolve));
+    elements.cancelTranslation.click();
+    assert.equal(oldSignal.aborted, true);
+    assertTranslationIdle(elements);
+
+    let newRequests = 0;
+    let newBody;
+    let newStreamCancelled = false;
+    context.fetch = async () => {
+      newRequests++;
+      if (newRequests < 3) return streamed(`New ${newRequests}`);
+      return new Response(new ReadableStream({
+        start(controller) {
+          newBody = controller;
+          controller.enqueue(encoder.encode(event("New body")));
+        },
+        cancel() { newStreamCancelled = true; }
+      }), { headers: { "Content-Type": "text/event-stream" } });
+    };
+    const newRun = elements.translatePost.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(newRequests, 3);
+    const newOutput = elements.translationOutput.value;
+    const newProgress = ["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]
+      .map(id => elements[id].textContent);
+    if (lateResult === "error") late.reject(new Error("Late provider failure"));
+    else if (lateResult === "JSON") late.resolve({ choices: [{ message: { content: "STALE JSON" } }] });
+    else late.resolve(streamed("STALE stream"));
+    await cancelledRun;
+
+    assert.equal(oldRequests, 1);
+    assert.equal(elements.translationOutput.value, newOutput);
+    assert.deepEqual(["translationTitleProgress", "translationDescriptionProgress", "translationBodyProgress"]
+      .map(id => elements[id].textContent), newProgress);
+    assert.equal(elements.translationStatus.textContent, "Translating body...");
+    assert.equal(elements.translatePost.disabled, true);
+    assert.equal(elements.cancelTranslation.hidden, false);
+    assert.equal(elements.cancelTranslation.disabled, false);
+    assert.equal(elements.copyFromBlog.disabled, true);
+    assert.equal(elements.translationInput.readOnly, true);
+    assert.equal(elements.targetLanguage.disabled, true);
+    assert.equal(newStreamCancelled, false);
+
+    newBody.close();
+    await newRun;
+    assert.equal(elements.translationOutput.value, newOutput);
+    assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    assertTranslationIdle(elements);
+  });
+}
+
+test("cancelling Translate leaves a concurrent Blog AI request running", async () => {
+  const instance = app();
+  const { elements, context } = instance;
+  configure(instance);
+  elements.title.value = "Blog title";
+  elements.translationInput.value = original;
+  let blogBody;
+  let blogCancelled = false;
+  let requests = 0;
+  context.fetch = async (_, options) => {
+    requests++;
+    if (requests === 1) {
+      assert.equal(options.signal, undefined);
+      return new Response(new ReadableStream({
+        start(controller) { blogBody = controller; },
+        cancel() { blogCancelled = true; }
+      }), { headers: { "Content-Type": "text/event-stream" } });
+    }
+    assert.equal(options.signal.aborted, false);
+    return new Response(new ReadableStream(), { headers: { "Content-Type": "text/event-stream" } });
+  };
+  const blogRun = elements.generateEnglishTitle.click();
+  const translationRun = elements.translatePost.click();
+  await new Promise(resolve => setImmediate(resolve));
+  elements.cancelTranslation.click();
+  await translationRun;
+  assert.equal(requests, 2);
+  assert.equal(blogCancelled, false);
+  assert.equal(elements.generateEnglishTitle.disabled, true);
+  blogBody.enqueue(encoder.encode(event("Translated Blog title")));
+  blogBody.close();
+  await blogRun;
+  assert.equal(elements.englishTitle.value, "Translated Blog title");
+  assert.equal(elements.generateEnglishTitle.disabled, false);
+  assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
+  assertTranslationIdle(elements);
+});
+
 test("errors retain partial output, identify the component, and allow retry", async () => {
   const instance = app();
   configure(instance);
@@ -376,6 +605,7 @@ test("errors retain partial output, identify the component, and allow retry", as
   assert.equal(instance.elements.translatePost.disabled, false);
   assert.equal(instance.elements.copyFromBlog.disabled, false);
   assert.equal(instance.elements.translationInput.readOnly, false);
+  assertTranslationIdle(instance.elements);
   instance.context.fetch = async () => streamed("Retried");
   await instance.elements.translatePost.click();
   assert.equal(instance.elements.translationStatus.textContent, "Translation complete.");

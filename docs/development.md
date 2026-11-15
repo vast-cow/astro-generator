@@ -34,7 +34,11 @@ responses. They cover tab order, independent Translate fields, explicit copying
 from Blog, edits preserved across tab switches and translation, source-preserving
 frontmatter replacement, three independent requests, both endpoint formats,
 partial streaming updates, errors and retries, model selection, and existing Blog
-features. Tests do not call an external provider or require credentials.
+features. Cancellation coverage includes all three steps on both endpoint types,
+aborting while connecting or streaming, retained partial output, immediate control
+restoration, retries, late responses and errors during a new translation, and
+isolation from concurrent Blog AI requests. Tests do not call an external provider
+or require credentials.
 
 After making changes, serve `public/` locally and verify:
 
@@ -43,7 +47,9 @@ After making changes, serve `public/` locally and verify:
 - clipboard and file download actions;
 - light and dark color schemes;
 - explicit Copy from Blog, independent filename and input edits, tab switching,
-  per-component streaming progress, reconstructed output, and error states; and
+  per-component streaming progress, reconstructed output, and error states;
+- cancellation during each translation step, preserved partial output, restored
+  controls, and starting a new translation; and
 - AI requests against each supported endpoint type, when credentials are
   available.
 

@@ -40,7 +40,8 @@ The date-time offset is derived from the browser's local timezone.
 4. Enter any language name in **Target language** (default: `English`), such as
    `Japanese` or `Brazilian Portuguese`.
 5. Select **Translate**. Follow the separate **Title**, **Description**, and
-   **Body** progress areas as responses stream in.
+   **Body** progress areas as responses stream in. Select **Cancel** at any point
+   to stop the translation.
 6. Wait for **Translation complete.**, then select and copy the finished
    Markdown from **Output**.
 
@@ -66,8 +67,16 @@ their original text, so wait for completion before using the document. If a
 request fails, the status identifies the component and marks Output incomplete;
 partial results remain visible. Correct the issue and select Translate to retry
 all three requests. Input and target language are locked only while translating;
-Copy from Blog is also disabled until the request finishes. File name remains
-editable.
+Copy from Blog is also disabled until translation finishes or is cancelled. File
+name remains editable.
+
+**Cancel** is available only while translating. It aborts the current request
+and stream, skips all remaining steps, and displays **Translation cancelled.**
+Output and progress generated so far remain visible; unfinished components may
+still contain partial translations or their original text. The controls unlock
+immediately. Select **Translate** to start again from Title without refreshing
+the page. Late responses from the cancelled run cannot overwrite the new run,
+and cancellation does not affect Blog's AI features.
 
 Translate's File name and Input start empty and remain independent of Blog.
 Switching tabs preserves both fields, translation results, and progress, including
