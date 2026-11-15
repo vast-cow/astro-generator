@@ -80,7 +80,9 @@
       resize: vertical;
     }
 
-    #output {
+    #output,
+    #translationInput,
+    #translationOutput {
       min-height: 260px;
       font-family: monospace;
     }
@@ -176,6 +178,10 @@
     <button class="tab-button" data-tab="config" type="button">
       Config
     </button>
+
+    <button class="tab-button" data-tab="translate" type="button">
+      Translate
+    </button>
   </div>
 
   <section id="blog" class="tab active">
@@ -255,6 +261,35 @@
     </div>
   </section>
 
+  <section id="translate" class="tab">
+    <label for="translationFilename">File name</label>
+    <input id="translationFilename" type="text" readonly>
+
+    <label for="translationInput">Input</label>
+    <textarea id="translationInput" aria-describedby="translationInputHint"></textarea>
+    <p id="translationInputHint" class="hint">
+      Copied from Blog when opening this tab. Edit this copy before translating.
+      Your original Blog content is unchanged.
+    </p>
+
+    <label for="targetLanguage">Target language</label>
+    <input id="targetLanguage" type="text" value="English">
+
+    <button id="translatePost" type="button">Translate</button>
+    <p id="translationStatus" class="status" role="status"></p>
+
+    <h2>Translation progress</h2>
+    <h3>Title</h3>
+    <div id="translationTitleProgress" class="ai-progress"></div>
+    <h3>Description</h3>
+    <div id="translationDescriptionProgress" class="ai-progress"></div>
+    <h3>Body</h3>
+    <div id="translationBodyProgress" class="ai-progress"></div>
+
+    <label for="translationOutput">Output</label>
+    <textarea id="translationOutput" readonly></textarea>
+  </section>
+
   <section id="config" class="tab">
     <h2>OpenAI-compatible API</h2>
 
@@ -294,7 +329,7 @@
     >
 
     <p id="translationModelHint" class="hint">
-      Leave empty to use Model for title translation.
+      Leave empty to use Model for all translations.
       Both models share the API endpoint and API key.
     </p>
 
@@ -318,6 +353,17 @@
     const filenameInput = document.getElementById("filename");
     const contentInput = document.getElementById("content");
     const output = document.getElementById("output");
+    const translationFilename = document.getElementById("translationFilename");
+    const translationInput = document.getElementById("translationInput");
+    const targetLanguage = document.getElementById("targetLanguage");
+    const translatePostButton = document.getElementById("translatePost");
+    const translationStatus = document.getElementById("translationStatus");
+    const translationOutput = document.getElementById("translationOutput");
+    const translationProgress = {
+      title: document.getElementById("translationTitleProgress"),
+      description: document.getElementById("translationDescriptionProgress"),
+      body: document.getElementById("translationBodyProgress")
+    };
 
     const generateButton = document.getElementById("generate");
     const copyButton = document.getElementById("copy");
@@ -410,6 +456,162 @@
         .replace(/\\/g, "\\\\")
         .replace(/"/g, '\\"')
         .replace(/\n/g, "\\n");
+    }
+
+    // Read only the text fields we translate. Other YAML is retained verbatim,
+    // including nested mappings, timestamps, comments, tags, and key ordering.
+    function parseTranslationDocument(source) {
+      const document = source.match(
+        /^(\uFEFF?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))([\s\S]*)$/
+      );
+
+      if (!document) {
+        throw new Error("Input must start with YAML frontmatter enclosed by --- lines.");
+      }
+
+      const [, opening, frontmatter, closing, body] = document;
+      let offset = 0;
+      const lines = frontmatter.split("\n").map(text => {
+        const line = { text: text.replace(/\r$/, ""), offset };
+        offset += text.length + 1;
+        return line;
+      });
+      const fields = {};
+
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        const key = line.text.match(
+          /^(title|description|pubDatetime|"title"|"description"|"pubDatetime"|'title'|'description'|'pubDatetime'):(?:[ \t]+(.*)|$)/
+        );
+        if (!key) continue;
+
+        const name = key[1].replace(/^["']|["']$/g, "");
+        if (fields[name]) {
+          throw new Error(`Duplicate ${name} field in frontmatter.`);
+        }
+        fields[name] = { value: key[2] || "" };
+        if (name === "pubDatetime") continue;
+
+        const raw = key[2] || "";
+        const start = line.offset + line.text.length - raw.length;
+        let last = index;
+        while (last + 1 < lines.length && /^(?:[ \t]|$)/.test(lines[last + 1].text)) {
+          last++;
+        }
+        // Block scalars need trailing blank lines for YAML chomping semantics.
+        if (!/^[|>]/.test(raw)) {
+          while (last > index && /^(?:\s*#.*|\s*)$/.test(lines[last].text)) last--;
+        }
+        const end = lines[last].offset + lines[last].text.length;
+        const scalar = frontmatter.slice(start, end).replace(/\r\n/g, "\n");
+        const parsed = parseYamlText(scalar, name);
+        fields[name] = { start, end: end - (scalar.length - parsed.length), value: parsed.value };
+        index = last;
+      }
+
+      for (const name of ["title", "description", "pubDatetime"]) {
+        if (!fields[name]) {
+          throw new Error(`Missing ${name} field in frontmatter.`);
+        }
+      }
+
+      return { opening, frontmatter, closing, body, fields };
+    }
+
+    function foldYamlText(value) {
+      return value.replace(/[ \t]*\n([ \t]*\n)*[ \t]*/g, breaks => {
+        const count = (breaks.match(/\n/g) || []).length;
+        return count === 1 ? " " : "\n".repeat(count - 1);
+      });
+    }
+
+    function parseYamlText(scalar, name) {
+      const invalid = () => {
+        throw new Error(`Use a plain, quoted, or block YAML string for ${name}.`);
+      };
+      const block = scalar.match(/^([|>])([1-9][+-]?|[+-][1-9]?)?(?:[ \t]+#.*)?[ \t]*(?:\n|$)/);
+      if (block) {
+        const lines = scalar.slice(block[0].length).split("\n");
+        const first = lines.find(line => line.trim());
+        const explicitIndent = block[2]?.match(/[1-9]/);
+        const indent = explicitIndent ? Number(explicitIndent[0]) : first?.match(/^ */)[0].length || 0;
+        if (lines.some(line => line.trim() && line.match(/^ */)[0].length < indent)) invalid();
+        const text = lines.map(line => line.slice(indent));
+        let value = "";
+        for (let index = 0; index < text.length; index++) {
+          value += text[index];
+          if (index + 1 < text.length) {
+            // Fold ordinary lines, retaining paragraphs and more-indented text.
+            let separator = "\n";
+            if (block[1] === ">" && !/^\s/.test(text[index]) && !/^\s/.test(text[index + 1])) {
+              if (text[index] && text[index + 1]) separator = " ";
+              else if (!text[index] && text[index + 1] && index > 0 &&
+                  !/^\s/.test(text[index - 1])) separator = "";
+            }
+            value += separator;
+          }
+        }
+        if (scalar.includes("\n")) value += "\n";
+        if (block[2]?.includes("-")) value = value.replace(/\n+$/, "");
+        else if (!block[2]?.includes("+")) value = value.replace(/\n+$/, value.trim() ? "\n" : "");
+        return { value, length: scalar.length };
+      }
+
+      const quoted = scalar.match(/^("(?:\\[\s\S]|[^"\\])*"|'(?:''|[^'])*')/);
+      if (quoted) {
+        if (!/^[ \t]*(?:#[^\n]*)?$/.test(scalar.slice(quoted[0].length))) invalid();
+        let value = quoted[0].slice(1, -1);
+        if (scalar[0] === "'") {
+          value = foldYamlText(value.replace(/''/g, "'"));
+        } else {
+          // YAML double-quoted scalars include JSON escapes and a few extras.
+          value = value.replace(/\\\n[ \t]*/g, "");
+          value = foldYamlText(value).replace(
+            /\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g,
+            (_, escape) => {
+              const escapes = {
+                "0": "\0", a: "\x07", b: "\b", t: "\t", n: "\n", v: "\v",
+                f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/",
+                "\\": "\\", N: "\u0085", _: "\u00a0", L: "\u2028", P: "\u2029"
+              };
+              if (/^[xuU]/.test(escape)) return String.fromCodePoint(parseInt(escape.slice(1), 16));
+              if (!(escape in escapes)) invalid();
+              return escapes[escape];
+            }
+          );
+        }
+        return { value, length: quoted[0].length };
+      }
+
+      if (/^[\s]*[\[\]{}&*!|>"'%@`]/.test(scalar)) invalid();
+      const value = scalar.replace(/[ \t]+#[^\n]*|^#[^\n]*/g, "");
+      if (/:(?:\s|$)/.test(value)) invalid();
+      const comment = scalar.search(/[ \t]+#|^#/);
+      return {
+        value: foldYamlText(value.trim()),
+        length: !scalar.includes("\n") && comment >= 0 ? comment : scalar.length
+      };
+    }
+
+    function reconstructTranslation(document, translated) {
+      let frontmatter = document.frontmatter;
+      const replacements = ["title", "description"]
+        .filter(name => translated[name] !== undefined)
+        .sort((a, b) => document.fields[b].start - document.fields[a].start);
+
+      for (const name of replacements) {
+        const { start, end } = document.fields[name];
+        // JSON strings are valid YAML; also escape YAML-specific line breaks.
+        const value = JSON.stringify(translated[name]).replace(
+          /[\u0085\u2028\u2029]/g,
+          character => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+        );
+        const separator = /[ \t]/.test(frontmatter[start - 1]) ? "" : " ";
+        frontmatter = frontmatter.slice(0, start) + separator + value + frontmatter.slice(end);
+      }
+
+      return document.opening + frontmatter + document.closing +
+        (translated.body ?? document.body);
     }
 
     function getTitleFromContent(content) {
@@ -708,6 +910,19 @@ ${title}
 `;
     }
 
+    function createPostTranslationPrompt(component, text, language) {
+      return `Translate the following article ${component} into ${language}.
+Translate all natural-language text accurately, retaining its meaning and tone.
+Do not summarize, omit, or add content. Return only the translation, without commentary or an enclosing code fence.
+${component === "body" ? `Preserve the Markdown syntax and document structure, including headings, lists, links, images, and code blocks.
+Do not translate or change code (including inline code), URLs, image paths, link destinations, or HTML tags and attributes. Translate link labels and image alt text where appropriate.` :
+        "Return plain text, without YAML formatting or additional quotation marks."}
+
+Source ${component}:
+
+${text}`;
+    }
+
     function createRequest(
       endpoint,
       model,
@@ -763,7 +978,7 @@ ${title}
       return request;
     }
 
-    function renderAIProgress(progressElement, reasoning, content) {
+    function renderAIProgress(progressElement, reasoning, content, structuredOutput = true) {
       progressElement.style.display = "block";
 
       let text = "";
@@ -777,7 +992,7 @@ ${title}
           text += "\n\n";
         }
 
-        text += `Structured output:\n${content}`;
+        text += `${structuredOutput ? "Structured output" : "Translation"}:\n${content}`;
       }
 
       if (!text) {
@@ -907,7 +1122,9 @@ ${title}
       prompt,
       structuredOutput,
       progressElement,
-      modelOverride = null
+      modelOverride = null,
+      onContent = null,
+      preserveWhitespace = false
     ) {
       const {
         endpoint,
@@ -928,6 +1145,11 @@ ${title}
 
       let generatedContent = "";
       let generatedReasoning = "";
+
+      function updateProgress() {
+        renderAIProgress(progressElement, generatedReasoning, generatedContent, structuredOutput);
+        if (onContent) onContent(generatedContent);
+      }
 
       progressElement.style.display = "block";
       progressElement.textContent = "Connecting...";
@@ -968,11 +1190,10 @@ ${title}
             textValue(data.choices?.[0]?.message?.content);
         }
 
-        renderAIProgress(
-          progressElement,
-          generatedReasoning,
-          generatedContent
-        );
+        if (data.error) {
+          throw new Error(data.error.message || JSON.stringify(data.error));
+        }
+        updateProgress();
       } else {
         if (!response.body) {
           throw new Error("Streaming response has no body.");
@@ -1001,11 +1222,7 @@ ${title}
             data = JSON.parse(raw);
           } catch {
             generatedContent += raw;
-            renderAIProgress(
-              progressElement,
-              generatedReasoning,
-              generatedContent
-            );
+            updateProgress();
             return;
           }
 
@@ -1015,55 +1232,64 @@ ${title}
             );
           }
 
+          if (data.type === "response.failed" || data.type === "response.incomplete") {
+            throw new Error(data.response?.error?.message || "The API did not complete the response.");
+          }
+          if (data.choices?.[0]?.finish_reason === "length" ||
+              data.choices?.[0]?.finish_reason === "content_filter") {
+            throw new Error("The API stopped before completing the response.");
+          }
+
           const extracted = extractStreamText(data);
           generatedContent += extracted.content;
           generatedReasoning += extracted.reasoning;
 
-          renderAIProgress(
-            progressElement,
-            generatedReasoning,
-            generatedContent
-          );
+          updateProgress();
         }
 
-        while (true) {
-          const { value, done } = await reader.read();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
 
-          buffer += decoder.decode(
-            value || new Uint8Array(),
-            { stream: !done }
-          );
+            buffer += decoder.decode(
+              value || new Uint8Array(),
+              { stream: !done }
+            );
 
-          const lines = buffer.split(/\r?\n/);
-          buffer = done ? "" : lines.pop();
+            const lines = buffer.split(/\r?\n/);
+            buffer = done ? "" : lines.pop();
 
-          for (const line of lines) {
-            if (line === "") {
+            for (const line of lines) {
+              if (line === "") {
+                processEvent();
+                continue;
+              }
+
+              if (line.startsWith(":")) {
+                continue;
+              }
+
+              if (line.startsWith("data:")) {
+                eventDataLines.push(
+                  line.slice(5).replace(/^ /, "")
+                );
+              }
+            }
+
+            if (done) {
+              if (buffer.startsWith("data:")) {
+                eventDataLines.push(
+                  buffer.slice(5).replace(/^ /, "")
+                );
+              }
+
               processEvent();
-              continue;
-            }
-
-            if (line.startsWith(":")) {
-              continue;
-            }
-
-            if (line.startsWith("data:")) {
-              eventDataLines.push(
-                line.slice(5).replace(/^ /, "")
-              );
+              break;
             }
           }
-
-          if (done) {
-            if (buffer.startsWith("data:")) {
-              eventDataLines.push(
-                buffer.slice(5).replace(/^ /, "")
-              );
-            }
-
-            processEvent();
-            break;
-          }
+        } finally {
+          await reader.cancel().catch(() => {});
+          reader.releaseLock();
         }
       }
 
@@ -1073,13 +1299,9 @@ ${title}
         );
       }
 
-      renderAIProgress(
-        progressElement,
-        generatedReasoning,
-        generatedContent
-      );
+      updateProgress();
 
-      return generatedContent.trim();
+      return preserveWhitespace ? generatedContent : generatedContent.trim();
     }
 
     function getTranslationModel() {
@@ -1101,6 +1323,70 @@ ${title}
       }
 
       return true;
+    }
+
+    async function translatePost() {
+      if (translatePostButton.disabled) return;
+      const language = targetLanguage.value.trim();
+      const model = getTranslationModel();
+      let document;
+
+      translationStatus.textContent = "";
+      translationOutput.value = "";
+      for (const progress of Object.values(translationProgress)) {
+        progress.textContent = "";
+        progress.style.display = "none";
+      }
+
+      try {
+        if (!language) throw new Error("Enter a target language.");
+        document = parseTranslationDocument(translationInput.value);
+        if (!validateAIConfig(model)) return;
+        saveConfig(false);
+      } catch (error) {
+        translationStatus.textContent = `Error: ${error.message}`;
+        return;
+      }
+
+      const translated = {};
+      let component;
+      translatePostButton.disabled = true;
+      translatePostButton.textContent = "Translating...";
+      translationInput.readOnly = true;
+      targetLanguage.disabled = true;
+      translationOutput.value = reconstructTranslation(document, translated);
+      for (const progress of Object.values(translationProgress)) {
+        progress.style.display = "block";
+        progress.textContent = "Waiting...";
+      }
+
+      try {
+        for (component of ["title", "description", "body"]) {
+          translationStatus.textContent = `Translating ${component}...`;
+          const source = component === "body" ? document.body : document.fields[component].value;
+          translated[component] = await requestAI(
+            createPostTranslationPrompt(component, source, language),
+            false,
+            translationProgress[component],
+            model,
+            content => {
+              translated[component] = content;
+              translationOutput.value = reconstructTranslation(document, translated);
+            },
+            component === "body"
+          );
+          translationOutput.value = reconstructTranslation(document, translated);
+        }
+        translationStatus.textContent = "Translation complete.";
+      } catch (error) {
+        translationStatus.textContent = `Error translating ${component}: ${error.message}. Output is incomplete.`;
+        translationProgress[component].textContent += `\n\nError: ${error.message}`;
+      } finally {
+        translatePostButton.disabled = false;
+        translatePostButton.textContent = "Translate";
+        translationInput.readOnly = false;
+        targetLanguage.disabled = false;
+      }
     }
 
     async function generateEnglishTitle() {
@@ -1195,6 +1481,18 @@ ${title}
         button.addEventListener("click", () => {
           const selectedTab = button.dataset.tab;
 
+          if (selectedTab === "translate" &&
+              !button.classList.contains("active") && !translatePostButton.disabled) {
+            translationFilename.value = filenameInput.value;
+            translationInput.value = output.value;
+            translationOutput.value = "";
+            translationStatus.textContent = "";
+            for (const progress of Object.values(translationProgress)) {
+              progress.style.display = "none";
+              progress.textContent = "";
+            }
+          }
+
           document
             .querySelectorAll(".tab-button")
             .forEach(item => {
@@ -1219,6 +1517,8 @@ ${title}
       "click",
       generatePost
     );
+
+    translatePostButton.addEventListener("click", translatePost);
 
     extractTitleButton.addEventListener(
       "click",
