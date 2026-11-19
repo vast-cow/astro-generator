@@ -185,6 +185,8 @@
   </div>
 
   <section id="blog" class="tab active">
+    <button id="clearBlog" type="button">Clear</button>
+
     <label for="content">Content</label>
     <textarea
       id="content"
@@ -262,7 +264,10 @@
   </section>
 
   <section id="translate" class="tab">
-    <button id="copyFromBlog" type="button">Copy from Blog</button>
+    <div class="actions">
+      <button id="clearTranslate" type="button">Clear</button>
+      <button id="copyFromBlog" type="button">Copy from Blog</button>
+    </div>
 
     <label for="translationFilename">File name</label>
     <input id="translationFilename" type="text">
@@ -392,6 +397,8 @@
     const descriptionOptionsList =
       document.getElementById("descriptionOptionsList");
 
+    let blogAIController = new AbortController();
+
     const apiEndpointInput = document.getElementById("apiEndpoint");
     const apiKeyInput = document.getElementById("apiKey");
     const apiModelInput = document.getElementById("apiModel");
@@ -464,6 +471,13 @@
         }
         if (migrateConfig && saved) saveTabFields(tab);
       }
+    }
+
+    function clearTabFields(tab) {
+      for (const field of Object.values(tabFields[tab])) {
+        field.value = "";
+      }
+      saveTabFields(tab);
     }
 
     function pad(number) {
@@ -1032,6 +1046,13 @@ ${text}`;
       progressElement.scrollTop = progressElement.scrollHeight;
     }
 
+    function clearAIProgress(progressElements) {
+      for (const progress of progressElements) {
+        progress.textContent = "";
+        progress.style.display = "none";
+      }
+    }
+
     function parseDescriptionJSON(text) {
       let value = text.trim();
 
@@ -1153,10 +1174,7 @@ ${text}`;
       prompt,
       structuredOutput,
       progressElement,
-      modelOverride = null,
-      onContent = null,
-      preserveWhitespace = false,
-      signal = undefined
+      { modelOverride, onContent, preserveWhitespace = false, signal } = {}
     ) {
       signal?.throwIfAborted();
       const {
@@ -1386,19 +1404,20 @@ ${text}`;
       setTranslationRunning(false);
     }
 
+    function clearTranslationProgress() {
+      translationStatus.textContent = "";
+      clearAIProgress(Object.values(translationProgress));
+    }
+
     async function translatePost() {
       if (translatePostButton.disabled) return;
       const language = targetLanguage.value.trim();
       const model = getTranslationModel();
       let document;
 
-      translationStatus.textContent = "";
+      clearTranslationProgress();
       translationOutput.value = "";
       saveTabFields("translate");
-      for (const progress of Object.values(translationProgress)) {
-        progress.textContent = "";
-        progress.style.display = "none";
-      }
 
       try {
         if (!language) throw new Error("Enter a target language.");
@@ -1432,15 +1451,17 @@ ${text}`;
             createPostTranslationPrompt(component, source, language),
             false,
             translationProgress[component],
-            model,
-            content => {
-              if (!isCurrentTranslation()) return;
-              translated[component] = content;
-              translationOutput.value = reconstructTranslation(document, translated);
-              saveTabFields("translate");
-            },
-            component === "body",
-            signal
+            {
+              modelOverride: model,
+              onContent: content => {
+                if (!isCurrentTranslation()) return;
+                translated[component] = content;
+                translationOutput.value = reconstructTranslation(document, translated);
+                saveTabFields("translate");
+              },
+              preserveWhitespace: component === "body",
+              signal
+            }
           );
           if (!isCurrentTranslation()) return;
           translated[component] = content;
@@ -1460,6 +1481,16 @@ ${text}`;
       }
     }
 
+    function setEnglishTitleRunning(running) {
+      generateEnglishTitleButton.disabled = running;
+      generateEnglishTitleButton.textContent = running ? "Translating..." : "Translate with AI";
+    }
+
+    function setDescriptionRunning(running) {
+      generateDescriptionButton.disabled = running;
+      generateDescriptionButton.textContent = running ? "Generating..." : "Generate with AI";
+    }
+
     async function generateEnglishTitle() {
       const title = titleInput.value.trim() || extractTitle();
 
@@ -1476,16 +1507,17 @@ ${text}`;
         return;
       }
 
-      generateEnglishTitleButton.disabled = true;
-      generateEnglishTitleButton.textContent = "Translating...";
+      const { signal } = blogAIController;
+      setEnglishTitleRunning(true);
 
       try {
         const translation = await requestAI(
           createTitleTranslationPrompt(title),
           false,
           englishTitleAIProgress,
-          translationModel
+          { modelOverride: translationModel, signal }
         );
+        signal.throwIfAborted();
 
         englishTitleInput.value = translation
           .replace(/^```(?:text)?\s*/i, "")
@@ -1494,14 +1526,13 @@ ${text}`;
           .trim();
         saveTabFields("blog");
       } catch (error) {
+        if (signal.aborted) return;
         console.error(error);
         englishTitleAIProgress.style.display = "block";
         englishTitleAIProgress.textContent =
           `Error:\n${error.message}`;
       } finally {
-        generateEnglishTitleButton.disabled = false;
-        generateEnglishTitleButton.textContent =
-          "Translate with AI";
+        if (!signal.aborted) setEnglishTitleRunning(false);
       }
     }
 
@@ -1517,8 +1548,8 @@ ${text}`;
         return;
       }
 
-      generateDescriptionButton.disabled = true;
-      generateDescriptionButton.textContent = "Generating...";
+      const { signal } = blogAIController;
+      setDescriptionRunning(true);
       descriptionOptions.style.display = "none";
       descriptionOptionsList.replaceChildren();
 
@@ -1526,21 +1557,22 @@ ${text}`;
         const generatedContent = await requestAI(
           createPrompt(body),
           true,
-          descriptionAIProgress
+          descriptionAIProgress,
+          { signal }
         );
+        signal.throwIfAborted();
         const descriptions =
           parseDescriptionJSON(generatedContent);
 
         showDescriptionOptions(descriptions);
       } catch (error) {
+        if (signal.aborted) return;
         console.error(error);
         descriptionAIProgress.style.display = "block";
         descriptionAIProgress.textContent =
           `Error:\n${error.message}`;
       } finally {
-        generateDescriptionButton.disabled = false;
-        generateDescriptionButton.textContent =
-          "Generate with AI";
+        if (!signal.aborted) setDescriptionRunning(false);
       }
     }
 
@@ -1577,17 +1609,30 @@ ${text}`;
     translatePostButton.addEventListener("click", translatePost);
     cancelTranslationButton.addEventListener("click", cancelTranslation);
 
+    document.getElementById("clearBlog").addEventListener("click", () => {
+      blogAIController.abort();
+      blogAIController = new AbortController();
+      setEnglishTitleRunning(false);
+      setDescriptionRunning(false);
+      clearTabFields("blog");
+      clearAIProgress([englishTitleAIProgress, descriptionAIProgress]);
+      descriptionOptions.style.display = "none";
+      descriptionOptionsList.replaceChildren();
+    });
+
+    document.getElementById("clearTranslate").addEventListener("click", () => {
+      cancelTranslation();
+      clearTabFields("translate");
+      clearTranslationProgress();
+    });
+
     copyFromBlogButton.addEventListener("click", () => {
       if (copyFromBlogButton.disabled) return;
       translationFilename.value = filenameInput.value;
       translationInput.value = output.value;
       translationOutput.value = "";
       saveTabFields("translate");
-      translationStatus.textContent = "";
-      for (const progress of Object.values(translationProgress)) {
-        progress.style.display = "none";
-        progress.textContent = "";
-      }
+      clearTranslationProgress();
     });
 
     extractTitleButton.addEventListener(

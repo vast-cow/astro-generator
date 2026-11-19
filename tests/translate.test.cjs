@@ -434,6 +434,63 @@ test("Copy from Blog replaces both fields only on click, without changing Blog o
   assert.equal(elements.translationInput.value, "");
 });
 
+test("each Clear button precedes the content and clears only its own tab across reloads", () => {
+  const fields = {
+    blog: {
+      content: "Blog body", date: "2026-11-19T09:30", title: "Blog title",
+      englishTitle: "English title", description: "Summary", filename: "blog.md", output: original
+    },
+    translate: {
+      translationFilename: "translation.md", translationInput: original,
+      targetLanguage: "Japanese", translationOutput: "Translated post"
+    },
+    config: { endpoint: "https://provider.test/v1/responses", model: "summary-model" }
+  };
+  for (const [tab, button, input, progressIds] of [
+    ["blog", "clearBlog", "content", ["englishTitleAIProgress", "descriptionAIProgress"]],
+    ["translate", "clearTranslate", "translationInput", ["translationTitleProgress",
+      "translationDescriptionProgress", "translationBodyProgress"]]
+  ]) {
+    const storage = new Map(Object.entries(fields).map(([name, values]) =>
+      [`astro-blog-generator:/index.html:${name}`, JSON.stringify(values)]));
+    const instance = app({ storage });
+    const { elements } = instance;
+    const section = html.match(new RegExp(`<section id="${tab}"[^>]*>([\\s\\S]*?)</section>`))[1];
+    assert.match(section, new RegExp(`id="${button}"[^>]*>Clear</button>[\\s\\S]*<label for="${input}"`));
+    for (const id of progressIds) {
+      elements[id].textContent = "Previous progress";
+      elements[id].style.display = "block";
+    }
+    elements.descriptionOptions.style.display = "block";
+    elements.descriptionOptionsList.append(element());
+    elements.translationStatus.textContent = "Translation complete.";
+
+    elements[button].click();
+
+    const ids = Object.keys(fields[tab]);
+    for (const id of ids) assert.equal(elements[id].value, "", id);
+    assertRestored(instance, ids);
+    const otherTab = tab === "blog" ? "translate" : "blog";
+    assert.deepEqual(stored(instance, otherTab), fields[otherTab]);
+    for (const [id, value] of Object.entries(fields[otherTab])) {
+      assert.equal(elements[id].value, value, id);
+    }
+    assert.deepEqual(stored(instance, "config"), fields.config);
+    for (const id of progressIds) {
+      assert.equal(elements[id].textContent, "");
+      assert.equal(elements[id].style.display, "none");
+    }
+    if (tab === "blog") {
+      assert.equal(elements.descriptionOptions.style.display, "none");
+      assert.equal(elements.descriptionOptionsList.children.length, 0);
+      assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    } else {
+      assert.equal(elements.translationStatus.textContent, "");
+      assert.equal(elements.descriptionOptionsList.children.length, 1);
+    }
+  }
+});
+
 test("frontmatter replacement preserves every other field, Markdown, comments, and CRLF", () => {
   const instance = app();
   instance.context.source = original.replace(/\n/g, "\r\n");
@@ -770,7 +827,7 @@ test("cancelling Translate leaves a concurrent Blog AI request running", async (
   context.fetch = async (_, options) => {
     requests++;
     if (requests === 1) {
-      assert.equal(options.signal, undefined);
+      assert.equal(options.signal.aborted, false);
       return new Response(new ReadableStream({
         start(controller) { blogBody = controller; },
         cancel() { blogCancelled = true; }
@@ -794,6 +851,63 @@ test("cancelling Translate leaves a concurrent Blog AI request running", async (
   assert.equal(elements.generateEnglishTitle.disabled, false);
   assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
   assertTranslationIdle(elements);
+});
+
+test("Clear aborts only its tab's requests and ignores late results after a retry", async () => {
+  const instance = app();
+  const { elements, context } = instance;
+  configure(instance);
+  edit(elements.title, "Blog title");
+  edit(elements.content, "Blog body");
+  edit(elements.translationInput, original);
+  const requests = [];
+  context.fetch = (_, { signal }) => {
+    const response = deferred();
+    requests.push({ signal, ...response });
+    return response.promise;
+  };
+
+  const oldTitle = elements.generateEnglishTitle.click();
+  const oldDescription = elements.generateDescription.click();
+  const oldTranslation = elements.translatePost.click();
+  elements.clearTranslate.click();
+  assert.equal(requests[2].signal.aborted, true);
+  assert.equal(requests[0].signal.aborted, false);
+  assert.equal(requests[1].signal.aborted, false);
+  assertTranslationIdle(elements);
+  assert.equal(elements.translationOutput.value, "");
+  assert.equal(elements.translationStatus.textContent, "");
+
+  edit(elements.targetLanguage, "English");
+  edit(elements.translationInput, original);
+  const newTranslation = elements.translatePost.click();
+  elements.clearBlog.click();
+  assert.equal(requests[0].signal.aborted, true);
+  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(requests[3].signal.aborted, false);
+  assert.equal(elements.generateEnglishTitle.disabled, false);
+  assert.equal(elements.generateDescription.disabled, false);
+
+  edit(elements.title, "New Blog title");
+  const newTitle = elements.generateEnglishTitle.click();
+  requests[0].resolve(streamed("Stale title"));
+  requests[1].reject(new Error("Stale error"));
+  requests[2].resolve(streamed("Stale translation"));
+  await Promise.all([oldTitle, oldDescription, oldTranslation]);
+  assert.equal(elements.englishTitle.value, "");
+  assert.equal(elements.generateEnglishTitle.disabled, true);
+  assert.equal(elements.englishTitleAIProgress.textContent, "Connecting...");
+  assert.equal(elements.descriptionAIProgress.textContent, "");
+  assert.equal(elements.description.value, "");
+  assert.equal(elements.translationOutput.value, original);
+
+  elements.clearTranslate.click();
+  requests[3].resolve(streamed("Stale retry"));
+  requests[4].resolve(streamed("New English title"));
+  await Promise.all([newTranslation, newTitle]);
+  assert.equal(elements.translationOutput.value, "");
+  assert.equal(elements.englishTitle.value, "New English title");
+  assertRestored(instance, ["description", "englishTitle", "translationOutput"]);
 });
 
 test("errors retain partial output, identify the component, and allow retry", async () => {
