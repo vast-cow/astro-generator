@@ -3,7 +3,8 @@
 ## Generate a post
 
 1. Enter or paste the article Markdown into **Content**.
-2. Choose the writing date and time.
+2. Adjust **Writing date and time** if needed. It starts at the local time when
+   the page loads.
 3. Enter a title, or start the article with a `# Heading` and select
    **Extract**.
 4. Enter an English title. This is normalized into the filename slug.
@@ -117,12 +118,13 @@ output support is required for description generation.
 
 ## Automatic saving
 
-All fields in **Blog**, **Translate**, and **Config** save to browser `localStorage`
+**Writing date and time** defaults to the local time at each page load. All other
+fields in **Blog**, **Translate**, and **Config** save to browser `localStorage`
 as they change and restore when you reopen or reload the page. This includes
 extracted titles, AI-generated titles and descriptions, filenames, generated
 Markdown, and translation output, including partial streamed results. Clearing a
-field also saves its empty value. Without saved values, the writing date defaults
-to the current local time and Target language defaults to `English`.
+saved field also saves its empty value. **Target language** defaults to `English`
+when there is no saved value.
 
 Each tab has its own record, scoped to the browser origin and page pathname:
 `astro-blog-generator:${location.pathname}:blog`,
@@ -144,9 +146,9 @@ unavailable. Clear this page's localStorage records to discard saved fields.
 
 ### Security and privacy
 
-All tab fields, including article text and the API key, are stored in the browser's
-`localStorage` for the page path. API requests are sent directly from the browser
-to the configured endpoint; this project does not include a proxy or backend.
+The browser's `localStorage` holds article text, generated results, and the API
+key for the page path. API requests are sent directly from the browser to the
+configured endpoint; this project does not include a proxy or backend.
 
 Use a restricted, revocable key intended for client-side use. Do not use a
 privileged production key on a shared computer or a publicly accessible

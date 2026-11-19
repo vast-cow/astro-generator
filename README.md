@@ -28,7 +28,8 @@ Open <http://localhost:8000>.
    (default: `English`) and select **Translate**. When complete, copy the translated
    Markdown from **Output**. The original Blog and publication date stay unchanged.
 
-All tab fields, including generated results and the API key, save automatically in
+The writing date and time defaults to the local time at each page load. All other
+tab fields, including generated results and the API key, save automatically in
 browser localStorage for each page path and restore on reload. AI features send text
 directly to the configured provider. Basic post generation needs no API.
 

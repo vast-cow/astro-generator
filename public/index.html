@@ -194,7 +194,7 @@
     ></textarea>
 
     <label for="date">Writing date and time</label>
-    <input id="date" type="datetime-local">
+    <input id="date" type="datetime-local" autocomplete="off">
 
     <label for="title">Title</label>
 
@@ -343,8 +343,8 @@
     </p>
 
     <p class="hint">
-      All Blog, Translate, and Config fields are automatically saved in
-      localStorage for this page path, including the API key.
+      Writing date and time starts at the local time when the page loads.
+      All other fields, including the API key, are saved in localStorage for this page path.
     </p>
   </section>
 
@@ -411,7 +411,6 @@
     const tabFields = {
       blog: {
         content: contentInput,
-        date: dateInput,
         title: titleInput,
         englishTitle: englishTitleInput,
         description: descriptionInput,
@@ -1614,6 +1613,7 @@ ${text}`;
       blogAIController = new AbortController();
       setEnglishTitleRunning(false);
       setDescriptionRunning(false);
+      dateInput.value = "";
       clearTabFields("blog");
       clearAIProgress([englishTitleAIProgress, descriptionAIProgress]);
       descriptionOptions.style.display = "none";

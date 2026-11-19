@@ -57,6 +57,7 @@ function element(attributes = "") {
 function app({
   storage = new Map(),
   href = "http://localhost/index.html",
+  dateConstructor = Date,
   localStorage = {
     getItem: key => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value)
@@ -89,7 +90,7 @@ function app({
     },
     navigator: { clipboard: { writeText: async text => copied.push(text) } },
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
-    Blob, TextDecoder, Uint8Array, AbortController,
+    Blob, TextDecoder, Uint8Array, AbortController, Date: dateConstructor,
     localStorage,
     alert: message => alerts.push(message),
     console: { error() {} },
@@ -165,11 +166,11 @@ function assertTranslationIdle(elements) {
   assert.equal(elements.translationFilename.readOnly, false);
 }
 
-test("all editable tab fields save on input and change and restore after reload", () => {
+test("persistent editable tab fields save on input and change and restore after reload", () => {
   const instance = app();
   const fields = {
     blog: {
-      content: "# Draft\n\n本文", date: "2026-11-15T09:30", title: "Draft title",
+      content: "# Draft\n\n本文", title: "Draft title",
       englishTitle: "Draft post", description: "Draft description", filename: "custom.md"
     },
     translate: {
@@ -183,7 +184,8 @@ test("all editable tab fields save on input and change and restore after reload"
   const configNames = { apiEndpoint: "endpoint", apiKey: "apiKey", apiModel: "model", translationModel: "translationModel" };
   const editableIds = [...html.matchAll(/<(input|textarea)\b([^>]*)>/g)]
     .filter(([, , attributes]) => !/\breadonly\b/.test(attributes))
-    .map(([, , attributes]) => attributes.match(/\bid="([^"]+)"/)[1]);
+    .map(([, , attributes]) => attributes.match(/\bid="([^"]+)"/)[1])
+    .filter(id => id !== "date");
   assert.deepEqual(Object.values(fields).flatMap(Object.keys).sort(), editableIds.sort());
   for (const [tab, values] of Object.entries(fields)) {
     for (const [id, value] of Object.entries(values)) {
@@ -202,6 +204,33 @@ test("all editable tab fields save on input and change and restore after reload"
   assertRestored(instance, editableIds);
   assert.equal(instance.elements.saveConfig, undefined);
   assert.equal(instance.elements.configStatus, undefined);
+});
+
+test("writing date uses the local time of each load and is omitted from saved fields", () => {
+  const key = "astro-blog-generator:/index.html:blog";
+  const legacy = JSON.stringify({ content: "Saved draft", date: "2026-11-15T09:30" });
+  const storage = new Map([[key, legacy]]);
+  let now = new Date(2026, 10, 19, 14, 5);
+  class LoadDate extends Date {
+    constructor(value = now) { super(value); }
+  }
+  const instance = app({ storage, dateConstructor: LoadDate });
+  const { elements } = instance;
+  assert.equal(elements.date.value, "2026-11-19T14:05");
+  assert.equal(elements.content.value, "Saved draft");
+  edit(elements.date, "2026-11-16T10:45", "input");
+  edit(elements.date, "2026-11-16T11:45", "change");
+  assert.equal(storage.get(key), legacy);
+  elements.generate.click();
+  assert.equal(elements.filename.value, "20261116-post.md");
+  assert.match(elements.output.value, /pubDatetime: 2026-11-16T11:45:00/);
+  assert.equal(Object.hasOwn(stored(instance, "blog"), "date"), false);
+
+  now = new Date(2026, 10, 20, 0, 10);
+  const reloaded = app({ storage, dateConstructor: LoadDate });
+  assert.equal(reloaded.elements.date.value, "2026-11-20T00:10");
+  assert.equal(reloaded.elements.content.value, "Saved draft");
+  assert.equal(reloaded.elements.output.value, elements.output.value);
 });
 
 test("missing saved data preserves defaults without writing storage", () => {
@@ -321,7 +350,7 @@ test("extraction, generation, and Copy from Blog persist without linking the tab
   elements.extractTitle.click();
   assertRestored(instance, ["title", "content"]);
   elements.generate.click();
-  const reloaded = assertRestored(instance, ["title", "content", "date", "filename", "output",
+  const reloaded = assertRestored(instance, ["title", "content", "filename", "output",
     "translationInput", "translationFilename"]);
   assert.equal(reloaded.elements.translationInput.value, "Independent input");
   assert.equal(reloaded.elements.translationFilename.value, "independent.md");
@@ -437,7 +466,7 @@ test("Copy from Blog replaces both fields only on click, without changing Blog o
 test("each Clear button precedes the content and clears only its own tab across reloads", () => {
   const fields = {
     blog: {
-      content: "Blog body", date: "2026-11-19T09:30", title: "Blog title",
+      content: "Blog body", title: "Blog title",
       englishTitle: "English title", description: "Summary", filename: "blog.md", output: original
     },
     translate: {
@@ -455,6 +484,8 @@ test("each Clear button precedes the content and clears only its own tab across 
       [`astro-blog-generator:/index.html:${name}`, JSON.stringify(values)]));
     const instance = app({ storage });
     const { elements } = instance;
+    const writingDate = "2026-11-19T09:30";
+    edit(elements.date, writingDate);
     const section = html.match(new RegExp(`<section id="${tab}"[^>]*>([\\s\\S]*?)</section>`))[1];
     assert.match(section, new RegExp(`id="${button}"[^>]*>Clear</button>[\\s\\S]*<label for="${input}"`));
     for (const id of progressIds) {
@@ -469,7 +500,7 @@ test("each Clear button precedes the content and clears only its own tab across 
 
     const ids = Object.keys(fields[tab]);
     for (const id of ids) assert.equal(elements[id].value, "", id);
-    assertRestored(instance, ids);
+    const reloaded = assertRestored(instance, ids);
     const otherTab = tab === "blog" ? "translate" : "blog";
     assert.deepEqual(stored(instance, otherTab), fields[otherTab]);
     for (const [id, value] of Object.entries(fields[otherTab])) {
@@ -481,10 +512,13 @@ test("each Clear button precedes the content and clears only its own tab across 
       assert.equal(elements[id].style.display, "none");
     }
     if (tab === "blog") {
+      assert.equal(elements.date.value, "");
+      assert.match(reloaded.elements.date.value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
       assert.equal(elements.descriptionOptions.style.display, "none");
       assert.equal(elements.descriptionOptionsList.children.length, 0);
       assert.equal(elements.translationStatus.textContent, "Translation complete.");
     } else {
+      assert.equal(elements.date.value, writingDate);
       assert.equal(elements.translationStatus.textContent, "");
       assert.equal(elements.descriptionOptionsList.children.length, 1);
     }
@@ -991,7 +1025,7 @@ test("Blog generation, AI features, configuration, copy, and download still work
   assertRestored(instance, ["description"]);
   assert.equal(stored(instance, "config").translationModel, "translator");
   assertRestored(instance, [
-    "content", "date", "title", "englishTitle", "description", "filename", "output",
+    "content", "title", "englishTitle", "description", "filename", "output",
     "apiEndpoint", "apiKey", "apiModel", "translationModel"
   ]);
   // Selecting another candidate also saves without a user input event.
