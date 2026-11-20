@@ -326,43 +326,49 @@ test("each output link requires its own valid URL, filename, and output and rest
 test("both output links clear content only above 7,000 serialized URL characters", () => {
   const filename = "  投稿 + & #.md  ";
   const markdown = original + "\n## 日本語\n\n- 記号: + & # %?=\n\n";
+  const oversizedValue = "x".repeat(7000);
   for (const [tab, configId, filenameId, outputId, linkId] of [
     ["blog", "blogLinkUrl", "filename", "output", "blogOutputLink"],
     ["translate", "translateLinkUrl", "translationFilename", "translationOutput", "translationOutputLink"]
   ]) {
-    const destination = `http://localhost:8000/${tab}?tag=%E6%97%A5&tag=%2B&filename=old&content=old#draft`;
-    const expected = new URL(destination);
-    expected.searchParams.set("filename", filename.trim());
-    expected.searchParams.set("content", markdown);
-    const padding = 7000 - expected.href.length;
+    const destination = new URL(
+      `http://localhost:8000/${tab}?tag=%E6%97%A5&tag=%2B&extra=&filename=old&content=old#draft`
+    );
+    const fullUrl = new URL(destination);
+    fullUrl.searchParams.set("filename", filename.trim());
+    fullUrl.searchParams.set("content", markdown);
+    const fullMarkdown = markdown + "x".repeat(7000 - fullUrl.href.length);
+    fullUrl.searchParams.set("content", fullMarkdown);
 
-    for (const length of [7000, 7001]) {
-      const fullMarkdown = markdown + "x".repeat(padding + length - 7000);
-      expected.searchParams.set("content", fullMarkdown);
+    const instance = app({ storage: new Map([[`astro-blog-generator:/index.html:${tab}`, JSON.stringify({
+      [filenameId]: filename, [outputId]: fullMarkdown,
+      ...(tab === "translate" && { translationComplete: true })
+    })]]) });
+    const { elements } = instance;
+
+    for (const [extra, oldValue] of [
+      ["", "old"],
+      ["x", "old"],
+      [oversizedValue, "old"],
+      ["", oversizedValue]
+    ]) {
+      destination.searchParams.set("extra", extra);
+      destination.searchParams.set("filename", oldValue);
+      destination.searchParams.set("content", oldValue);
+
+      const expected = new URL(fullUrl);
+      expected.searchParams.set("extra", extra);
+      const length = 7000 + extra.length;
       assert.equal(expected.href.length, length);
       if (length > 7000) expected.searchParams.set("content", "");
 
-      const instance = app({ storage: new Map([[`astro-blog-generator:/index.html:${tab}`, JSON.stringify({
-        [filenameId]: filename, [outputId]: fullMarkdown,
-        ...(tab === "translate" && { translationComplete: true })
-      })]]) });
-      const { elements } = instance;
-      edit(elements[configId], destination);
-      assert.equal(elements[linkId].href, expected.href, `${tab} at ${length}`);
+      edit(elements[configId], destination.href);
+      assert.equal(elements[linkId].href, expected.href,
+        `${tab} at ${length} after replacing parameters in a ${destination.href.length}-character destination`);
       assert.equal(elements[linkId].getAttribute("aria-disabled"), "false");
       assert.equal(elements[outputId].value, fullMarkdown);
       assert.equal(stored(instance, tab)[outputId], fullMarkdown);
       assert.equal(assertRestored(instance, [outputId]).elements[linkId].href, expected.href);
-
-      const longDestination = new URL(destination);
-      longDestination.searchParams.set("extra", "x".repeat(7000));
-      edit(elements[configId], longDestination.href);
-      expected.searchParams.set("content", "");
-      expected.searchParams.set("extra", longDestination.searchParams.get("extra"));
-      assert.ok(expected.href.length > 7000);
-      assert.equal(elements[linkId].href, expected.href);
-      assert.equal(elements[linkId].getAttribute("aria-disabled"), "false");
-      expected.searchParams.delete("extra");
     }
   }
 });
