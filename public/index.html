@@ -87,6 +87,16 @@
       font-family: monospace;
     }
 
+    .output-link {
+      display: inline-block;
+      margin: 6px 0;
+      color: var(--accent-color);
+    }
+
+    .output-link[aria-disabled="true"] {
+      color: var(--muted-color);
+    }
+
     .actions,
     .field-actions {
       display: flex;
@@ -256,6 +266,8 @@
 
     <label for="output">Generated output</label>
     <textarea id="output" readonly></textarea>
+    <a id="blogOutputLink" class="output-link" role="link" aria-disabled="true"
+      target="_blank" rel="noopener noreferrer">Open in new tab</a>
 
     <div class="actions">
       <button id="copy" type="button">Copy</button>
@@ -297,6 +309,8 @@
 
     <label for="translationOutput">Output</label>
     <textarea id="translationOutput" readonly></textarea>
+    <a id="translationOutputLink" class="output-link" role="link" aria-disabled="true"
+      target="_blank" rel="noopener noreferrer">Open in new tab</a>
   </section>
 
   <section id="config" class="tab">
@@ -342,6 +356,14 @@
       Both models share the API endpoint and API key.
     </p>
 
+    <h2>Output links</h2>
+
+    <label for="blogLinkUrl">Blog link URL</label>
+    <input id="blogLinkUrl" type="url">
+
+    <label for="translateLinkUrl">Translate link URL</label>
+    <input id="translateLinkUrl" type="url">
+
     <p class="hint">
       Writing date and time starts at the local time when the page loads.
       All other fields, including the API key, are saved in localStorage for this page path.
@@ -357,6 +379,7 @@
     const filenameInput = document.getElementById("filename");
     const contentInput = document.getElementById("content");
     const output = document.getElementById("output");
+    const blogOutputLink = document.getElementById("blogOutputLink");
     const translationFilename = document.getElementById("translationFilename");
     const translationInput = document.getElementById("translationInput");
     const copyFromBlogButton = document.getElementById("copyFromBlog");
@@ -365,12 +388,14 @@
     const cancelTranslationButton = document.getElementById("cancelTranslation");
     const translationStatus = document.getElementById("translationStatus");
     const translationOutput = document.getElementById("translationOutput");
+    const translationOutputLink = document.getElementById("translationOutputLink");
     const translationProgress = {
       title: document.getElementById("translationTitleProgress"),
       description: document.getElementById("translationDescriptionProgress"),
       body: document.getElementById("translationBodyProgress")
     };
     let activeTranslation = null;
+    let translationComplete = false;
 
     const generateButton = document.getElementById("generate");
     const copyButton = document.getElementById("copy");
@@ -404,6 +429,8 @@
     const apiModelInput = document.getElementById("apiModel");
     const translationModelInput =
       document.getElementById("translationModel");
+    const blogLinkUrl = document.getElementById("blogLinkUrl");
+    const translateLinkUrl = document.getElementById("translateLinkUrl");
 
     const STORAGE_PREFIX = `astro-blog-generator:${window.location.pathname}`;
     const LEGACY_CONFIG_STORAGE_KEY =
@@ -427,9 +454,46 @@
         endpoint: apiEndpointInput,
         apiKey: apiKeyInput,
         model: apiModelInput,
-        translationModel: translationModelInput
+        translationModel: translationModelInput,
+        blogLinkUrl,
+        translateLinkUrl
       }
     };
+
+    function createOutputUrl(destination, filename, content) {
+      destination = destination.trim();
+      filename = filename.trim();
+      if (!filename || !content || !/^https?:\/\//i.test(destination)) return null;
+
+      let url;
+      try {
+        url = new URL(destination);
+      } catch {
+        return null;
+      }
+      url.searchParams.set("filename", filename);
+      url.searchParams.set("content", content);
+      return url;
+    }
+
+    function setOutputLink(link, url) {
+      if (url) link.href = url.href;
+      else link.removeAttribute("href");
+      link.setAttribute("aria-disabled", String(!url));
+    }
+
+    function updateOutputLinks(tab = "config") {
+      if (tab === "blog" || tab === "config") {
+        setOutputLink(blogOutputLink, createOutputUrl(
+          blogLinkUrl.value, filenameInput.value, output.value
+        ));
+      }
+      if (tab === "translate" || tab === "config") {
+        setOutputLink(translationOutputLink, translationComplete ? createOutputUrl(
+          translateLinkUrl.value, translationFilename.value, translationOutput.value
+        ) : null);
+      }
+    }
 
     function readStoredFields(key) {
       try {
@@ -444,10 +508,12 @@
 
     // Programmatic value assignments also call this; they emit no input/change event.
     function saveTabFields(tab) {
+      updateOutputLinks(tab);
       try {
         const values = Object.fromEntries(
           Object.entries(tabFields[tab]).map(([name, field]) => [name, field.value])
         );
+        if (tab === "translate") values.translationComplete = translationComplete;
         localStorage.setItem(`${STORAGE_PREFIX}:${tab}`, JSON.stringify(values));
       } catch (error) {
         // Storage may be blocked or full; editing and AI operations still work.
@@ -460,6 +526,7 @@
         let saved = readStoredFields(`${STORAGE_PREFIX}:${tab}`);
         const migrateConfig = tab === "config" && !saved;
         if (migrateConfig) saved = readStoredFields(LEGACY_CONFIG_STORAGE_KEY);
+        if (tab === "translate") translationComplete = saved?.translationComplete === true;
 
         for (const [name, field] of Object.entries(fields)) {
           if (saved && Object.hasOwn(saved, name) && typeof saved[name] === "string") {
@@ -470,6 +537,7 @@
         }
         if (migrateConfig && saved) saveTabFields(tab);
       }
+      updateOutputLinks();
     }
 
     function clearTabFields(tab) {
@@ -1415,6 +1483,7 @@ ${text}`;
       let document;
 
       clearTranslationProgress();
+      translationComplete = false;
       translationOutput.value = "";
       saveTabFields("translate");
 
@@ -1467,6 +1536,8 @@ ${text}`;
           translationOutput.value = reconstructTranslation(document, translated);
           saveTabFields("translate");
         }
+        translationComplete = true;
+        saveTabFields("translate");
         translationStatus.textContent = "Translation complete.";
       } catch (error) {
         if (!isCurrentTranslation()) return;
@@ -1622,6 +1693,7 @@ ${text}`;
 
     document.getElementById("clearTranslate").addEventListener("click", () => {
       cancelTranslation();
+      translationComplete = false;
       clearTabFields("translate");
       clearTranslationProgress();
     });
@@ -1630,6 +1702,7 @@ ${text}`;
       if (copyFromBlogButton.disabled) return;
       translationFilename.value = filenameInput.value;
       translationInput.value = output.value;
+      translationComplete = false;
       translationOutput.value = "";
       saveTabFields("translate");
       clearTranslationProgress();

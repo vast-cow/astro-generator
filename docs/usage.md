@@ -88,6 +88,18 @@ Translate, and editing or translating in Translate does not affect Blog. Only
 selecting **Copy from Blog** replaces Translate's fields with Blog's current
 values and clears prior translation results and progress.
 
+## Open output in another tab
+
+In **Config**, set **Blog link URL** and **Translate link URL** to their
+respective absolute HTTP or HTTPS destinations. Both settings start empty and
+save automatically.
+
+Select **Open in new tab** below **Generated output** or **Output** to send the
+trimmed filename and full Markdown, including frontmatter, as the `filename`
+and `content` query parameters. The destination keeps its other query parameters
+and fragment. Both links require a valid destination and a filename. Blog also
+requires generated output, and Translate requires a completed translation.
+
 ## AI configuration
 
 The AI features are optional; Markdown generation, copying, and downloading do
@@ -135,9 +147,11 @@ saved configuration from the same page URL is migrated automatically when no
 valid configuration record exists for the new key.
 
 Restoration does not generate a post, copy Blog fields to Translate, or resume AI
-requests. Progress displays and request status are temporary; only field values
-are restored. **Copy from Blog** remains the explicit way to replace Translate's
-filename and input and clear its previous output.
+requests. Progress displays and status messages are temporary. Translate saves
+its completion flag with its output so finished translations can be opened after
+reload. Interrupted, failed, or older output without a completion flag remains
+visible with the link disabled. Starting a translation, clearing Translate, or
+selecting **Copy from Blog** resets the flag.
 
 If storage is blocked, full, or contains invalid data, the application continues
 to work. Valid saved string fields are restored where possible; unavailable or

@@ -32,6 +32,8 @@ console.log("keep code");
 
 function element(attributes = "") {
   const classes = new Set(attributes.match(/class="([^"]*)"/)?.[1].split(" ") || []);
+  const attrs = new Map([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)]
+    .map(([, name, value]) => [name, value]));
   return {
     value: attributes.match(/value="([^"]*)"/)?.[1] || "",
     readOnly: /\breadonly\b/.test(attributes),
@@ -42,6 +44,11 @@ function element(attributes = "") {
     dataset: { tab: attributes.match(/data-tab="([^"]*)"/)?.[1] },
     children: [],
     listeners: {},
+    get href() { return this.getAttribute("href") || ""; },
+    set href(value) { this.setAttribute("href", value); },
+    getAttribute: name => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: name => attrs.delete(name),
     classList: {
       contains: name => classes.has(name),
       toggle(name, on) { if (on) classes.add(name); else classes.delete(name); }
@@ -89,7 +96,10 @@ function app({
       }
     },
     navigator: { clipboard: { writeText: async text => copied.push(text) } },
-    URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+    URL: class extends URL {
+      static createObjectURL() { return "blob:test"; }
+      static revokeObjectURL() {}
+    },
     Blob, TextDecoder, Uint8Array, AbortController, Date: dateConstructor,
     localStorage,
     alert: message => alerts.push(message),
@@ -178,7 +188,9 @@ test("persistent editable tab fields save on input and change and restore after 
     },
     config: {
       apiEndpoint: "https://provider.test/v1/responses", apiKey: "test-key",
-      apiModel: "summary-model", translationModel: "translator"
+      apiModel: "summary-model", translationModel: "translator",
+      blogLinkUrl: "http://localhost:8000/blog?view=draft#editor",
+      translateLinkUrl: "https://example.test/translate"
     }
   };
   const configNames = { apiEndpoint: "endpoint", apiKey: "apiKey", apiModel: "model", translationModel: "translationModel" };
@@ -238,10 +250,151 @@ test("missing saved data preserves defaults without writing storage", () => {
   assert.match(elements.date.value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
   assert.equal(elements.targetLanguage.value, "English");
   for (const id of ["content", "title", "englishTitle", "description", "filename", "output",
-    "translationInput", "translationFilename", "translationOutput", "apiEndpoint", "apiKey", "apiModel", "translationModel"]) {
+    "translationInput", "translationFilename", "translationOutput", "apiEndpoint", "apiKey", "apiModel",
+    "translationModel", "blogLinkUrl", "translateLinkUrl"]) {
     assert.equal(elements[id].value, "", id);
   }
   assert.equal(storage.size, 0);
+});
+
+function assertDisabledLink(link) {
+  assert.equal(link.getAttribute("href"), null);
+  assert.equal(link.getAttribute("aria-disabled"), "true");
+}
+
+test("each output link requires its own valid URL, filename, and output and restores the complete query", () => {
+  const filename = "  投稿 + & # %?.md  ";
+  const markdown = original + "\n日本語 + & # %?=\n\n";
+  const destinations = {
+    blog: "http://localhost:8000/blog?tag=%E6%97%A5&tag=%2B&filename=old&content=old#draft",
+    translate: "https://example.test/translation?view=review#output"
+  };
+  for (const [tab, configId, filenameId, outputId, linkId] of [
+    ["blog", "blogLinkUrl", "filename", "output", "blogOutputLink"],
+    ["translate", "translateLinkUrl", "translationFilename", "translationOutput", "translationOutputLink"]
+  ]) {
+    for (const hasOutput of [false, true]) {
+      const storage = new Map([[`astro-blog-generator:/index.html:${tab}`, JSON.stringify({
+        [filenameId]: filename,
+        [outputId]: hasOutput ? markdown : "",
+        ...(tab === "translate" && { translationComplete: true })
+      })]]);
+      const instance = app({ storage });
+      const { elements } = instance;
+      const link = elements[linkId];
+      assertDisabledLink(link);
+      edit(elements[tab === "blog" ? "translateLinkUrl" : "blogLinkUrl"], "https://other.test");
+      assertDisabledLink(link);
+
+      edit(elements[configId], destinations[tab]);
+      if (hasOutput) {
+        assert.equal(link.getAttribute("aria-disabled"), "false");
+        assert.equal(link.getAttribute("target"), "_blank");
+        assert.equal(link.getAttribute("rel"), "noopener noreferrer");
+        const actual = new URL(link.href);
+        const expected = new URL(destinations[tab]);
+        expected.searchParams.delete("filename");
+        expected.searchParams.delete("content");
+        assert.deepEqual(actual.searchParams.getAll("filename"), [filename.trim()]);
+        assert.deepEqual(actual.searchParams.getAll("content"), [markdown]);
+        actual.searchParams.delete("filename");
+        actual.searchParams.delete("content");
+        assert.deepEqual([...actual.searchParams], [...expected.searchParams]);
+        assert.equal(actual.origin, expected.origin);
+        assert.equal(actual.pathname, expected.pathname);
+        assert.equal(actual.hash, expected.hash);
+        const reloaded = assertRestored(instance, [configId, filenameId, outputId]);
+        assert.equal(reloaded.elements[linkId].href, link.href);
+      } else {
+        assertDisabledLink(link);
+      }
+
+      edit(elements[filenameId], " \t ");
+      assertDisabledLink(link);
+      edit(elements[filenameId], filename, "change");
+      assert.equal(Boolean(link.href), hasOutput);
+      for (const invalid of ["", "/local", "//example.test", "https:example.test",
+        "https://", "http://[broken]", "ftp://example.test", "javascript:alert(1)"]) {
+        edit(elements[configId], invalid, "change");
+        assertDisabledLink(link);
+      }
+    }
+  }
+});
+
+test("translation links stay disabled for interrupted, failed, and legacy output and enable after success", async () => {
+  const saved = {
+    translationFilename: " translation.md ",
+    translationInput: original,
+    translationOutput: original
+  };
+  const storage = new Map([["astro-blog-generator:/index.html:translate", JSON.stringify(saved)]]);
+  const instance = app({ storage });
+  const { elements, context } = instance;
+  configure(instance);
+  edit(elements.translateLinkUrl, "https://example.test/translation");
+  assert.equal(elements.translationOutput.value, original);
+  assertDisabledLink(elements.translationOutputLink);
+
+  const finish = async () => {
+    context.fetch = async () => streamed("Complete");
+    await elements.translatePost.click();
+    assert.equal(stored(instance, "translate").translationComplete, true);
+    assert.equal(elements.translationOutputLink.getAttribute("aria-disabled"), "false");
+    const reloaded = assertRestored(instance, ["translationOutput"]);
+    assert.equal(reloaded.elements.translationOutputLink.href, elements.translationOutputLink.href);
+  };
+  const assertIncomplete = () => {
+    assert.ok(elements.translationOutput.value);
+    assert.equal(stored(instance, "translate").translationComplete, false);
+    assertDisabledLink(elements.translationOutputLink);
+    const reloaded = assertRestored(instance, ["translationOutput", "translateLinkUrl"]);
+    assertDisabledLink(reloaded.elements.translationOutputLink);
+  };
+  await finish();
+
+  const pending = deferred();
+  context.fetch = () => pending.promise;
+  const cancelled = elements.translatePost.click();
+  assertIncomplete();
+  elements.cancelTranslation.click();
+  pending.resolve(streamed("Late response"));
+  await cancelled;
+  assertIncomplete();
+
+  let requests = 0;
+  context.fetch = async () => ++requests === 1 ? streamed("New title") :
+    new Response("Provider error", { status: 429 });
+  await elements.translatePost.click();
+  assert.match(elements.translationOutput.value, /New title/);
+  assertIncomplete();
+  await finish();
+});
+
+test("Copy from Blog and Clear reset a previously completed translation link", () => {
+  for (const button of ["copyFromBlog", "clearTranslate"]) {
+    const storage = new Map([
+      ["astro-blog-generator:/index.html:blog", JSON.stringify({ filename: "blog.md", output: original })],
+      ["astro-blog-generator:/index.html:translate", JSON.stringify({
+        translationFilename: "translation.md", translationOutput: original, translationComplete: true
+      })],
+      ["astro-blog-generator:/index.html:config", JSON.stringify({
+        blogLinkUrl: "https://example.test/blog", translateLinkUrl: "https://example.test/translation"
+      })]
+    ]);
+    const instance = app({ storage });
+    const { elements } = instance;
+    const blogHref = elements.blogOutputLink.href;
+    assert.ok(elements.translationOutputLink.href);
+    elements[button].click();
+    assert.equal(elements.translationOutput.value, "");
+    assert.equal(stored(instance, "translate").translationComplete, false);
+    assertDisabledLink(elements.translationOutputLink);
+    assert.equal(elements.blogOutputLink.href, blogHref);
+    assertDisabledLink(assertRestored(instance, ["translationOutput"]).elements.translationOutputLink);
+    elements.clearBlog.click();
+    assertDisabledLink(elements.blogOutputLink);
+  }
 });
 
 test("all tab storage is isolated by pathname and shared across query strings and fragments", () => {
@@ -272,7 +425,9 @@ test("legacy configuration migrates at the same URL and newer values take priori
   assert.equal(instance.elements.apiKey.value, legacy.apiKey);
   assert.equal(instance.elements.apiModel.value, legacy.model);
   assert.equal(instance.elements.translationModel.value, "");
-  assert.deepEqual(stored(instance, "config"), { ...legacy, translationModel: "" });
+  assert.deepEqual(stored(instance, "config"), {
+    ...legacy, translationModel: "", blogLinkUrl: "", translateLinkUrl: ""
+  });
   edit(instance.elements.apiKey, "");
   edit(instance.elements.apiModel, "new-model");
   edit(instance.elements.translationModel, "new-translator");
