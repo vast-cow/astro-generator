@@ -95,10 +95,14 @@ respective absolute HTTP or HTTPS destinations. Both settings start empty and
 save automatically.
 
 Select **Open in new tab** below **Generated output** or **Output** to send the
-trimmed filename and full Markdown, including frontmatter, as the `filename`
-and `content` query parameters. The destination keeps its other query parameters
-and fragment. Both links require a valid destination and a filename. Blog also
-requires generated output, and Translate requires a completed translation.
+trimmed filename and Markdown as the `filename` and `content` query parameters.
+When the full encoded URL is 7,000 characters or fewer, `content` includes all
+Markdown and frontmatter. When it exceeds 7,000 characters, the link still opens
+with `content=`. The filename, other query parameters, and fragment are retained,
+and the full Markdown stays visible and saved in the generator.
+
+Both links require a valid destination and a filename. Blog also requires
+generated output, and Translate requires a completed translation.
 
 ## AI configuration
 

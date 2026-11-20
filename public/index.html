@@ -474,6 +474,9 @@
       }
       url.searchParams.set("filename", filename);
       url.searchParams.set("content", content);
+      if (url.href.length > 7000) {
+        url.searchParams.set("content", "");
+      }
       return url;
     }
 
