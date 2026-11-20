@@ -463,7 +463,8 @@
     function createOutputUrl(destination, filename, content) {
       destination = destination.trim();
       filename = filename.trim();
-      if (!filename || !content || !/^https?:\/\//i.test(destination)) return null;
+      const hasAuthority = /^https?:\/\/[^/?#\\\s]+(?:[/?#]|$)/i.test(destination);
+      if (!filename || !content || !hasAuthority) return null;
 
       let url;
       try {
@@ -1241,7 +1242,7 @@ ${text}`;
       prompt,
       structuredOutput,
       progressElement,
-      { modelOverride, onContent, preserveWhitespace = false, signal } = {}
+      { modelOverride, onContent, preserveWhitespace = false, requireCompletion = false, signal } = {}
     ) {
       signal?.throwIfAborted();
       const {
@@ -1315,6 +1316,13 @@ ${text}`;
           throw new Error(data.error.message || JSON.stringify(data.error));
         }
         updateProgress();
+        const finishReason = data.choices?.[0]?.finish_reason;
+        if (requireCompletion && (
+          ["failed", "incomplete", "cancelled", "queued", "in_progress"].includes(data.status) ||
+          (finishReason && finishReason !== "stop")
+        )) {
+          throw new Error("The API did not complete the response.");
+        }
       } else {
         if (!response.body) {
           throw new Error("Streaming response has no body.");
@@ -1326,6 +1334,7 @@ ${text}`;
         const decoder = new TextDecoder();
         let buffer = "";
         let eventDataLines = [];
+        let completed = false;
 
         function processEvent() {
           if (eventDataLines.length === 0) {
@@ -1335,7 +1344,9 @@ ${text}`;
           const raw = eventDataLines.join("\n").trim();
           eventDataLines = [];
 
-          if (!raw || raw === "[DONE]") {
+          if (!raw) return;
+          if (raw === "[DONE]") {
+            completed = true;
             return;
           }
 
@@ -1349,18 +1360,23 @@ ${text}`;
             return;
           }
 
-          if (data.error) {
+          if (data.error || (requireCompletion && data.type === "error")) {
+            const error = data.error || data;
             throw new Error(
-              data.error.message || JSON.stringify(data.error)
+              error.message || JSON.stringify(error)
             );
           }
 
           if (data.type === "response.failed" || data.type === "response.incomplete") {
             throw new Error(data.response?.error?.message || "The API did not complete the response.");
           }
-          if (data.choices?.[0]?.finish_reason === "length" ||
-              data.choices?.[0]?.finish_reason === "content_filter") {
+          const finishReason = data.choices?.[0]?.finish_reason;
+          if (finishReason === "length" || finishReason === "content_filter" ||
+              (requireCompletion && finishReason && finishReason !== "stop")) {
             throw new Error("The API stopped before completing the response.");
+          }
+          if (data.type === "response.completed" || finishReason === "stop") {
+            completed = true;
           }
 
           const extracted = extractStreamText(data);
@@ -1415,6 +1431,9 @@ ${text}`;
           signal?.removeEventListener("abort", cancelReader);
           await reader.cancel().catch(() => {});
           reader.releaseLock();
+        }
+        if (requireCompletion && !completed) {
+          throw new Error("The API stream ended before confirming completion.");
         }
       }
 
@@ -1528,6 +1547,7 @@ ${text}`;
                 saveTabFields("translate");
               },
               preserveWhitespace: component === "body",
+              requireCompletion: true,
               signal
             }
           );

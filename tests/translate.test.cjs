@@ -314,7 +314,8 @@ test("each output link requires its own valid URL, filename, and output and rest
       edit(elements[filenameId], filename, "change");
       assert.equal(Boolean(link.href), hasOutput);
       for (const invalid of ["", "/local", "//example.test", "https:example.test",
-        "https://", "http://[broken]", "ftp://example.test", "javascript:alert(1)"]) {
+        "https://", "https:///example.test", "https://\\example.test", "http://\tvalid.test",
+        "http://[broken]", "ftp://example.test", "javascript:alert(1)"]) {
         edit(elements[configId], invalid, "change");
         assertDisabledLink(link);
       }
@@ -394,6 +395,69 @@ test("Copy from Blog and Clear reset a previously completed translation link", (
     assertDisabledLink(assertRestored(instance, ["translationOutput"]).elements.translationOutputLink);
     elements.clearBlog.click();
     assertDisabledLink(elements.blogOutputLink);
+  }
+});
+
+test("incomplete provider responses retain partial translation output with the link disabled", async () => {
+  for (const [endpoint, incompleteResponse] of [
+    ["chat/completions", () => new Response(event("Partial body"), {
+      headers: { "Content-Type": "text/event-stream" }
+    })],
+    ["responses", () => new Response(event("Partial body", true), {
+      headers: { "Content-Type": "text/event-stream" }
+    })],
+    ["responses", () => new Response(
+      event("Partial body", true) + 'data: {"type":"error","message":"Provider error"}\n\n' +
+        "data: [DONE]\n\n",
+      { headers: { "Content-Type": "text/event-stream" } }
+    )],
+    ["chat/completions", () => Response.json({
+      choices: [{ message: { content: "Partial body" }, finish_reason: "length" }]
+    })],
+    ["responses", () => Response.json({
+      status: "incomplete", output: [{ content: [{ text: "Partial body" }] }]
+    })]
+  ]) {
+    const instance = app();
+    const { elements, context } = instance;
+    configure(instance, endpoint);
+    edit(elements.translateLinkUrl, "https://example.test/translate");
+    edit(elements.translationFilename, "translation.md");
+    edit(elements.translationInput, original);
+    let requests = 0;
+    context.fetch = async () => ++requests < 3
+      ? streamed("Finished", endpoint === "responses") : incompleteResponse();
+
+    await elements.translatePost.click();
+    assert.match(elements.translationStatus.textContent, /Error translating body.*Output is incomplete/);
+    assert.ok(elements.translationOutput.value.endsWith("Partial body"));
+    assert.equal(stored(instance, "translate").translationComplete, false);
+    assertDisabledLink(elements.translationOutputLink);
+    assertDisabledLink(assertRestored(instance, ["translationOutput"]).elements.translationOutputLink);
+  }
+});
+
+test("complete JSON provider responses enable the translation link", async () => {
+  for (const [endpoint, data] of [
+    ["chat/completions", {
+      choices: [{ message: { content: "Finished" }, finish_reason: "stop" }]
+    }],
+    ["responses", {
+      status: "completed", output: [{ content: [{ text: "Finished" }] }]
+    }]
+  ]) {
+    const instance = app();
+    const { elements, context } = instance;
+    configure(instance, endpoint);
+    edit(elements.translateLinkUrl, "https://example.test/translate");
+    edit(elements.translationFilename, "translation.md");
+    edit(elements.translationInput, original);
+    context.fetch = async () => Response.json(data);
+
+    await elements.translatePost.click();
+    assert.equal(elements.translationStatus.textContent, "Translation complete.");
+    assert.equal(stored(instance, "translate").translationComplete, true);
+    assert.ok(elements.translationOutputLink.href);
   }
 });
 
@@ -808,6 +872,9 @@ for (const endpoint of ["chat/completions", "responses"]) {
     assert.match(elements.translationDescriptionProgress.textContent, /Descrição/);
     const remainder = original.slice(original.indexOf("\n\n- [A link]"));
     bodyController.enqueue(encoder.encode(event(remainder, endpoint === "responses")));
+    const completion = endpoint === "responses" ? { type: "response.completed" } :
+      { choices: [{ delta: {}, finish_reason: "stop" }] };
+    bodyController.enqueue(encoder.encode("data: " + JSON.stringify(completion) + "\n\n"));
     bodyController.close();
     await translating;
     assert.equal(calls.length, 3);
@@ -996,6 +1063,7 @@ for (const lateResult of ["stream", "JSON", "error"]) {
     assert.equal(elements.targetLanguage.disabled, true);
     assert.equal(newStreamCancelled, false);
 
+    newBody.enqueue(encoder.encode("data: [DONE]\n\n"));
     newBody.close();
     await newRun;
     assert.equal(elements.translationOutput.value, newOutput);

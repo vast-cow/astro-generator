@@ -66,11 +66,11 @@ before publishing.
 
 Output updates during each stream. Components that have not started retain
 their original text, so wait for completion before using the document. If a
-request fails, the status identifies the component and marks Output incomplete;
-partial results remain visible. Correct the issue and select Translate to retry
-all three requests. Input and target language are locked only while translating;
-Copy from Blog is also disabled until translation finishes or is cancelled. File
-name remains editable.
+request fails, the status identifies the component and marks Output incomplete.
+Partial results remain visible. A stream must confirm completion for each
+component before the translation is complete. Correct the issue and select
+Translate to retry all three requests. Input, target language, and Copy from Blog
+are locked until translation finishes or is cancelled. File name remains editable.
 
 **Cancel** is available only while translating. It aborts the current request
 and stream, skips all remaining steps, and displays **Translation cancelled.**
