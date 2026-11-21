@@ -101,8 +101,8 @@ uses the corresponding value from the tab whose link you open.
 - `{filename}` inserts the filename with leading and trailing whitespace removed.
 - `{content}` inserts the complete Markdown, including frontmatter.
 - `{filenameEncoded}` and `{contentEncoded}` apply `encodeURIComponent` to the
-  same values. Use these when characters such as `&` or `#` should be treated
-  as part of a value.
+  same values. Use the encoded placeholders to preserve line breaks and keep
+  reserved characters such as `&` or `#` inside the value.
 
 For example, set **Blog link URL** to
 `https://example.test/import/{filenameEncoded}?body={contentEncoded}`
