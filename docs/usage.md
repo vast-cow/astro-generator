@@ -92,14 +92,27 @@ values and clears prior translation results and progress.
 
 In **Config**, set **Blog link URL** and **Translate link URL** to their
 respective absolute HTTP or HTTPS destinations. Both settings start empty and
-save automatically.
+save automatically. A URL without placeholders opens as entered, including
+any existing query parameters and fragment.
 
-Select **Open in new tab** below **Generated output** or **Output** to send the
-trimmed filename and Markdown as the `filename` and `content` query parameters.
-When the full encoded URL is 7,000 characters or fewer, `content` includes all
-Markdown and frontmatter. When it exceeds 7,000 characters, the link still opens
-with `content=`. The filename, other query parameters, and fragment are retained,
-and the full Markdown stays visible and saved in the generator.
+Add placeholders anywhere in the path, query, or fragment. Each occurrence
+uses the corresponding value from the tab whose link you open.
+
+- `{filename}` inserts the filename with leading and trailing whitespace removed.
+- `{content}` inserts the complete Markdown, including frontmatter.
+- `{filenameEncoded}` and `{contentEncoded}` apply `encodeURIComponent` to the
+  same values. Use these when characters such as `&` or `#` should be treated
+  as part of a value.
+
+For example, set **Blog link URL** to
+`https://example.test/import/{filenameEncoded}?body={contentEncoded}`
+and **Translate link URL** to
+`https://example.test/translate?file={filenameEncoded}&body={contentEncoded}`.
+
+Select **Open in new tab** below **Generated output** or **Output**. If the
+expanded URL exceeds 7,000 characters after normalization, the generator
+expands the template again with both content placeholders empty. The complete
+Markdown stays visible and saved in the generator.
 
 Both links require a valid destination and a filename. Blog also requires
 generated output, and Translate requires a completed translation.

@@ -160,6 +160,10 @@
       color: var(--muted-color);
     }
 
+    .hint code {
+      overflow-wrap: anywhere;
+    }
+
     @media (prefers-color-scheme: dark) {
       :root {
         --page-background: #0d1117;
@@ -358,11 +362,26 @@
 
     <h2>Output links</h2>
 
+    <p id="outputLinkPlaceholders" class="hint">
+      Use <code>{filename}</code>, <code>{content}</code>,
+      <code>{filenameEncoded}</code>, or <code>{contentEncoded}</code> in the
+      path, query, or fragment. The <code>Encoded</code> placeholders escape
+      characters for use in URLs.
+    </p>
+
     <label for="blogLinkUrl">Blog link URL</label>
-    <input id="blogLinkUrl" type="url">
+    <input id="blogLinkUrl" type="text" inputmode="url"
+      aria-describedby="outputLinkPlaceholders blogLinkUrlExample">
+    <p id="blogLinkUrlExample" class="hint">
+      Example <code>https://example.test/import/{filenameEncoded}?body={contentEncoded}</code>
+    </p>
 
     <label for="translateLinkUrl">Translate link URL</label>
-    <input id="translateLinkUrl" type="url">
+    <input id="translateLinkUrl" type="text" inputmode="url"
+      aria-describedby="outputLinkPlaceholders translateLinkUrlExample">
+    <p id="translateLinkUrlExample" class="hint">
+      Example <code>https://example.test/translate?file={filenameEncoded}&amp;body={contentEncoded}</code>
+    </p>
 
     <p class="hint">
       Writing date and time starts at the local time when the page loads.
@@ -460,28 +479,38 @@
       }
     };
 
-    function createOutputUrl(destination, filename, content) {
-      destination = destination.trim();
-      filename = filename.trim();
-      const hasAuthority = /^https?:\/\/[^/?#\\\s]+(?:[/?#]|$)/i.test(destination);
-      if (!filename || !content || !hasAuthority) return null;
+    function parseOutputUrl(destination) {
+      if (!/^https?:\/\/[^/?#\\\s]+(?:[/?#]|$)/i.test(destination.trim())) return null;
+      return new URL(destination);
+    }
 
-      let url;
+    function createOutputUrl(template, filename, content) {
+      filename = filename.trim();
+      if (!filename || !content) return null;
+
+      const placeholders = /\{(filename|content)(Encoded)?\}/g;
+      const hasPlaceholders = placeholders.test(template);
+
+      function expand(markdown) {
+        return template.replace(placeholders, (_, field, encoded) => {
+          const value = field === "filename" ? filename : markdown;
+          return encoded ? encodeURIComponent(value) : value;
+        });
+      }
+
       try {
-        url = new URL(destination);
+        const url = parseOutputUrl(hasPlaceholders ? expand(content) : template);
+        if (!url) return null;
+        if (!hasPlaceholders) return template;
+        if (url.href.length > 7000) return parseOutputUrl(expand(""))?.href ?? null;
+        return url.href;
       } catch {
         return null;
       }
-      url.searchParams.set("filename", filename);
-      url.searchParams.set("content", content);
-      if (url.href.length > 7000) {
-        url.searchParams.set("content", "");
-      }
-      return url;
     }
 
     function setOutputLink(link, url) {
-      if (url) link.href = url.href;
+      if (url) link.href = url;
       else link.removeAttribute("href");
       link.setAttribute("aria-disabled", String(!url));
     }

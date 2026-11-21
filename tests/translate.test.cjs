@@ -262,17 +262,16 @@ function assertDisabledLink(link) {
   assert.equal(link.getAttribute("aria-disabled"), "true");
 }
 
-test("each output link requires its own valid URL, filename, and output and restores the complete query", () => {
+const outputLinkTabs = [
+  ["blog", "blogLinkUrl", "filename", "output", "blogOutputLink"],
+  ["translate", "translateLinkUrl", "translationFilename", "translationOutput", "translationOutputLink"]
+];
+
+test("each output link requires its own valid URL, filename, and output and preserves a plain saved URL", () => {
   const filename = "  投稿 + & # %?.md  ";
   const markdown = original + "\n日本語 + & # %?=\n\n";
-  const destinations = {
-    blog: "http://localhost:8000/blog?tag=%E6%97%A5&tag=%2B&filename=old&content=old#draft",
-    translate: "https://example.test/translation?view=review#output"
-  };
-  for (const [tab, configId, filenameId, outputId, linkId] of [
-    ["blog", "blogLinkUrl", "filename", "output", "blogOutputLink"],
-    ["translate", "translateLinkUrl", "translationFilename", "translationOutput", "translationOutputLink"]
-  ]) {
+  for (const [tab, configId, filenameId, outputId, linkId] of outputLinkTabs) {
+    const destination = `http://localhost:8000/${tab}?tag=%e6%97%a5&tag=%2B&filename=old&content=old%20body&bare#draft`;
     for (const hasOutput of [false, true]) {
       const storage = new Map([[`astro-blog-generator:/index.html:${tab}`, JSON.stringify({
         [filenameId]: filename,
@@ -286,23 +285,12 @@ test("each output link requires its own valid URL, filename, and output and rest
       edit(elements[tab === "blog" ? "translateLinkUrl" : "blogLinkUrl"], "https://other.test");
       assertDisabledLink(link);
 
-      edit(elements[configId], destinations[tab]);
+      edit(elements[configId], destination);
       if (hasOutput) {
         assert.equal(link.getAttribute("aria-disabled"), "false");
         assert.equal(link.getAttribute("target"), "_blank");
         assert.equal(link.getAttribute("rel"), "noopener noreferrer");
-        const actual = new URL(link.href);
-        const expected = new URL(destinations[tab]);
-        expected.searchParams.delete("filename");
-        expected.searchParams.delete("content");
-        assert.deepEqual(actual.searchParams.getAll("filename"), [filename.trim()]);
-        assert.deepEqual(actual.searchParams.getAll("content"), [markdown]);
-        actual.searchParams.delete("filename");
-        actual.searchParams.delete("content");
-        assert.deepEqual([...actual.searchParams], [...expected.searchParams]);
-        assert.equal(actual.origin, expected.origin);
-        assert.equal(actual.pathname, expected.pathname);
-        assert.equal(actual.hash, expected.hash);
+        assert.equal(link.getAttribute("href"), destination);
         const reloaded = assertRestored(instance, [configId, filenameId, outputId]);
         assert.equal(reloaded.elements[linkId].href, link.href);
       } else {
@@ -315,7 +303,8 @@ test("each output link requires its own valid URL, filename, and output and rest
       assert.equal(Boolean(link.href), hasOutput);
       for (const invalid of ["", "/local", "//example.test", "https:example.test",
         "https://", "https:///example.test", "https://\\example.test", "http://\tvalid.test",
-        "http://[broken]", "ftp://example.test", "javascript:alert(1)"]) {
+        "\u00a0https://example.test", "http://[broken]", "ftp://example.test", "javascript:alert(1)",
+        "/import/{filenameEncoded}?body={contentEncoded}", "https://[{filenameEncoded}]/import"]) {
         edit(elements[configId], invalid, "change");
         assertDisabledLink(link);
       }
@@ -323,52 +312,81 @@ test("each output link requires its own valid URL, filename, and output and rest
   }
 });
 
-test("both output links clear content only above 7,000 serialized URL characters", () => {
+test("both tabs expand all placeholders in one pass and save the original template", async () => {
+  const filename = "  投稿 + & # %? {contentEncoded} $&.md  ";
+  const body = "## 日本語\n\n- + & # %?= / {filenameEncoded} {content} $&\n\n";
+  const instance = app();
+  const { elements, context } = instance;
+  configure(instance);
+  for (const [tab, configId, filenameId, outputId, linkId] of outputLinkTabs) {
+    const prefix = `https://example.test/${tab}`;
+    const template = `${prefix}/{filenameEncoded}?body={contentEncoded}&file={filenameEncoded}` +
+      "&copy={contentEncoded}#file={filename}&raw={content}&fileAgain={filename}&rawAgain={content}";
+    edit(elements[configId], template);
+    assertDisabledLink(elements[linkId]);
+
+    if (tab === "blog") {
+      edit(elements.title, "日本語");
+      edit(elements.content, body);
+      elements.generate.click();
+    } else {
+      edit(elements.translationInput, original);
+      const responses = ["日本語", "説明", body];
+      context.fetch = async () => streamed(responses.shift());
+      await elements.translatePost.click();
+    }
+    edit(elements[filenameId], filename);
+
+    const markdown = elements[outputId].value;
+    assert.match(markdown, /^---\ntitle: "日本語"/);
+    assert.ok(markdown.endsWith(body));
+    const encodedFilename = encodeURIComponent(filename.trim());
+    const encodedContent = encodeURIComponent(markdown);
+    const expected = new URL(`${prefix}/${encodedFilename}?body=${encodedContent}&file=${encodedFilename}` +
+      `&copy=${encodedContent}#file=${filename.trim()}&raw=${markdown}&fileAgain=${filename.trim()}&rawAgain=${markdown}`);
+    const actual = new URL(elements[linkId].href);
+    assert.equal(actual.href, expected.href);
+    assert.equal(actual.searchParams.get("body"), markdown);
+    assert.equal(actual.searchParams.get("file"), filename.trim());
+    assert.equal(stored(instance, "config")[configId], template);
+    const reloaded = assertRestored(instance, [configId, filenameId, outputId]);
+    assert.equal(reloaded.elements[linkId].href, expected.href);
+  }
+});
+
+test("both output links clear content placeholders only above 7,000 normalized URL characters", () => {
   const filename = "  投稿 + & #.md  ";
   const markdown = original + "\n## 日本語\n\n- 記号: + & # %?=\n\n";
   const oversizedValue = "x".repeat(7000);
-  for (const [tab, configId, filenameId, outputId, linkId] of [
-    ["blog", "blogLinkUrl", "filename", "output", "blogOutputLink"],
-    ["translate", "translateLinkUrl", "translationFilename", "translationOutput", "translationOutputLink"]
-  ]) {
-    const destination = new URL(
-      `http://localhost:8000/${tab}?tag=%E6%97%A5&tag=%2B&extra=&filename=old&content=old#draft`
-    );
-    const fullUrl = new URL(destination);
-    fullUrl.searchParams.set("filename", filename.trim());
-    fullUrl.searchParams.set("content", markdown);
-    const fullMarkdown = markdown + "x".repeat(7000 - fullUrl.href.length);
-    fullUrl.searchParams.set("content", fullMarkdown);
+  for (const [tab, configId, filenameId, outputId, linkId] of outputLinkTabs) {
+    const prefix = `http://localhost:8000/${tab}`;
+    const urlPrefix = `${prefix}/${encodeURIComponent(filename.trim())}?tag=%e6%97%a5&tag=%2B`;
+    const expanded = (extra, content) => new URL(
+      `${urlPrefix}&extra=${extra}&body=${encodeURIComponent(content)}#raw=${content}&name=${filename.trim()}`
+    ).href;
+    const padding = "x".repeat(7000 - expanded("", markdown).length);
 
     const instance = app({ storage: new Map([[`astro-blog-generator:/index.html:${tab}`, JSON.stringify({
-      [filenameId]: filename, [outputId]: fullMarkdown,
+      [filenameId]: filename, [outputId]: markdown,
       ...(tab === "translate" && { translationComplete: true })
     })]]) });
     const { elements } = instance;
 
-    for (const [extra, oldValue] of [
-      ["", "old"],
-      ["x", "old"],
-      [oversizedValue, "old"],
-      ["", oversizedValue]
-    ]) {
-      destination.searchParams.set("extra", extra);
-      destination.searchParams.set("filename", oldValue);
-      destination.searchParams.set("content", oldValue);
+    for (const extra of [padding, `${padding}x`, oversizedValue]) {
+      const fullUrl = expanded(extra, markdown);
+      const length = 7000 + extra.length - padding.length;
+      assert.equal(fullUrl.length, length);
+      const expected = length > 7000 ? expanded(extra, "") : fullUrl;
+      const template = `${prefix}/${oversizedValue}/../{filenameEncoded}?tag=%e6%97%a5&tag=%2B` +
+        `&extra=${extra}&body={contentEncoded}#raw={content}&name={filename}`;
 
-      const expected = new URL(fullUrl);
-      expected.searchParams.set("extra", extra);
-      const length = 7000 + extra.length;
-      assert.equal(expected.href.length, length);
-      if (length > 7000) expected.searchParams.set("content", "");
-
-      edit(elements[configId], destination.href);
-      assert.equal(elements[linkId].href, expected.href,
-        `${tab} at ${length} after replacing parameters in a ${destination.href.length}-character destination`);
+      edit(elements[configId], template);
+      assert.equal(elements[linkId].href, expected, `${tab} at ${length} normalized characters`);
+      assert.equal(new URL(elements[linkId].href).searchParams.get("body"), length > 7000 ? "" : markdown);
       assert.equal(elements[linkId].getAttribute("aria-disabled"), "false");
-      assert.equal(elements[outputId].value, fullMarkdown);
-      assert.equal(stored(instance, tab)[outputId], fullMarkdown);
-      assert.equal(assertRestored(instance, [outputId]).elements[linkId].href, expected.href);
+      assert.equal(elements[outputId].value, markdown);
+      assert.equal(stored(instance, tab)[outputId], markdown);
+      assert.equal(assertRestored(instance, [configId, outputId]).elements[linkId].href, expected);
     }
   }
 });
@@ -383,7 +401,7 @@ test("translation links stay disabled for interrupted, failed, and legacy output
   const instance = app({ storage });
   const { elements, context } = instance;
   configure(instance);
-  edit(elements.translateLinkUrl, "https://example.test/translation");
+  edit(elements.translateLinkUrl, "https://example.test/translation/{filenameEncoded}?body={contentEncoded}");
   assert.equal(elements.translationOutput.value, original);
   assertDisabledLink(elements.translationOutputLink);
 
