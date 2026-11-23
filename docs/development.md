@@ -20,8 +20,9 @@ To deploy manually, open **Actions** → **Deploy GitHub Pages (public)** →
 **Run workflow**, select `main`, and start the run. If both attempts fail, review
 their logs, check [GitHub Status](https://www.githubstatus.com/) for a Pages
 incident, and confirm **Settings** → **Pages** uses **GitHub Actions** as the
-source. After resolving the issue, re-run the failed job to deploy the same
-commit, or use **Run workflow** to deploy the current `main`.
+source. If Pages reports a deployment is still in progress, wait for it to
+finish. Use **Run workflow** to deploy the current `main` in a fresh run with its
+own artifact.
 
 For another static host, deploy `public/index.html` as the site's entry point.
 No server-side runtime or environment variables are required.
