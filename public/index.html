@@ -573,9 +573,9 @@
       updateOutputLinks();
     }
 
-    function clearTabFields(tab) {
+    function clearTabFields(tab, ...preservedFields) {
       for (const field of Object.values(tabFields[tab])) {
-        field.value = "";
+        if (!preservedFields.includes(field)) field.value = "";
       }
       saveTabFields(tab);
     }
@@ -1736,7 +1736,7 @@ ${text}`;
       blogAIController = new AbortController();
       setEnglishTitleRunning(false);
       setDescriptionRunning(false);
-      dateInput.value = "";
+      dateInput.value = toLocalInputValue(new Date());
       clearTabFields("blog");
       clearAIProgress([englishTitleAIProgress, descriptionAIProgress]);
       descriptionOptions.style.display = "none";
@@ -1746,7 +1746,7 @@ ${text}`;
     document.getElementById("clearTranslate").addEventListener("click", () => {
       cancelTranslation();
       translationComplete = false;
-      clearTabFields("translate");
+      clearTabFields("translate", targetLanguage);
       clearTranslationProgress();
     });
 

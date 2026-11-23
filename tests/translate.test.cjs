@@ -769,10 +769,17 @@ test("each Clear button precedes the content and clears only its own tab across 
   ]) {
     const storage = new Map(Object.entries(fields).map(([name, values]) =>
       [`astro-blog-generator:/index.html:${name}`, JSON.stringify(values)]));
-    const instance = app({ storage });
+    let now = new Date(2026, 10, 20, 23, 55);
+    class ClearDate extends Date {
+      constructor(value = now) { super(value); }
+    }
+    const instance = app({ storage, dateConstructor: ClearDate });
     const { elements } = instance;
+    assert.equal(elements.date.value, "2026-11-20T23:55");
     const writingDate = "2026-11-19T09:30";
+    const targetLanguage = "Brazilian Portuguese";
     edit(elements.date, writingDate);
+    if (tab === "translate") edit(elements.targetLanguage, targetLanguage);
     const section = html.match(new RegExp(`<section id="${tab}"[^>]*>([\\s\\S]*?)</section>`))[1];
     assert.match(section, new RegExp(`id="${button}"[^>]*>Clear</button>[\\s\\S]*<label for="${input}"`));
     for (const id of progressIds) {
@@ -783,11 +790,14 @@ test("each Clear button precedes the content and clears only its own tab across 
     elements.descriptionOptionsList.append(element());
     elements.translationStatus.textContent = "Translation complete.";
 
+    now = new Date(2026, 10, 21, 0, 7, 48);
     elements[button].click();
 
     const ids = Object.keys(fields[tab]);
-    for (const id of ids) assert.equal(elements[id].value, "", id);
-    const reloaded = assertRestored(instance, ids);
+    for (const id of ids) {
+      assert.equal(elements[id].value, id === "targetLanguage" ? targetLanguage : "", id);
+    }
+    assertRestored(instance, ids);
     const otherTab = tab === "blog" ? "translate" : "blog";
     assert.deepEqual(stored(instance, otherTab), fields[otherTab]);
     for (const [id, value] of Object.entries(fields[otherTab])) {
@@ -799,8 +809,8 @@ test("each Clear button precedes the content and clears only its own tab across 
       assert.equal(elements[id].style.display, "none");
     }
     if (tab === "blog") {
-      assert.equal(elements.date.value, "");
-      assert.match(reloaded.elements.date.value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+      assert.equal(elements.date.value, "2026-11-21T00:07");
+      assert.equal(Object.hasOwn(stored(instance, "blog"), "date"), false);
       assert.equal(elements.descriptionOptions.style.display, "none");
       assert.equal(elements.descriptionOptionsList.children.length, 0);
       assert.equal(elements.translationStatus.textContent, "Translation complete.");
