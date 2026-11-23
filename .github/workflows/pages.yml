@@ -46,7 +46,7 @@ jobs:
       - name: Wait 30 seconds before retrying Pages deployment
         id: deployment_retry_delay
         if: ${{ !cancelled() && steps.deployment.outcome == 'failure' }}
-        run: sleep 30
+        run: sleep 5
 
       - name: Retry GitHub Pages deployment
         id: deployment_retry
