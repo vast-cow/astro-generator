@@ -16,25 +16,39 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: >-
+        ${{ steps.deployment.outcome == 'success' && steps.deployment.outputs.page_url
+        || steps.deployment_retry.outcome == 'success' && steps.deployment_retry.outputs.page_url
+        || '' }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Upload public/ as-is as the Pages site artifact
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: public
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+
+      - name: Wait 30 seconds before retrying Pages deployment
+        id: deployment_retry_delay
+        if: ${{ !cancelled() && steps.deployment.outcome == 'failure' }}
+        run: sleep 30
+
+      - name: Retry GitHub Pages deployment
+        id: deployment_retry
+        if: ${{ !cancelled() && steps.deployment_retry_delay.outcome == 'success' }}
+        uses: actions/deploy-pages@v5

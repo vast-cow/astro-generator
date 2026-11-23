@@ -2,9 +2,26 @@
 
 ## Deployment
 
-The included GitHub Actions workflow publishes the contents of `public/` to
-GitHub Pages whenever relevant changes are pushed to `main`. It can also be
-started manually with `workflow_dispatch`.
+The GitHub Actions workflow publishes `public/` directly when a push to `main`
+changes `public/**` or `.github/workflows/pages.yml`. It uses
+`actions/checkout@v7`, `actions/upload-pages-artifact@v5`, and
+`actions/deploy-pages@v5` on GitHub-hosted `ubuntu-latest` with Node.js 24.
+
+The `pages` concurrency group protects the active deployment from newer runs.
+GitHub keeps one pending run and replaces it if another run arrives.
+
+Each run makes at most two deployment attempts. If the first fails, the workflow
+waits 30 seconds and retries using the same `github-pages` artifact. Cancelling
+the workflow skips any remaining retry steps. If either attempt succeeds, its
+URL appears on the `github-pages` environment. If both attempts fail, the job
+fails and both errors remain in the Actions logs.
+
+To deploy manually, open **Actions** → **Deploy GitHub Pages (public)** →
+**Run workflow**, select `main`, and start the run. If both attempts fail, review
+their logs, check [GitHub Status](https://www.githubstatus.com/) for a Pages
+incident, and confirm **Settings** → **Pages** uses **GitHub Actions** as the
+source. After resolving the issue, re-run the failed job to deploy the same
+commit, or use **Run workflow** to deploy the current `main`.
 
 For another static host, deploy `public/index.html` as the site's entry point.
 No server-side runtime or environment variables are required.
