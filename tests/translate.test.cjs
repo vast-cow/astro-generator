@@ -1459,6 +1459,26 @@ test("Run All reports missing input and never forwards earlier generation result
   assertRunAllIdle(elements);
 });
 
+test("An empty opening heading preserves the entered title and Markdown in Extract and Run All", async () => {
+  const { elements, context } = batchApp();
+  const body = "#  \r\n\r\nBody without a heading";
+  edit(elements.content, body);
+  elements.extractTitle.click();
+  assert.equal(elements.title.value, "Previous title");
+  assert.equal(elements.content.value, body);
+
+  const prompts = [];
+  context.fetch = async (_, { body }) => {
+    const index = prompts.push(JSON.parse(body).messages[0].content) - 1;
+    return streamed(batchResponses[index]);
+  };
+  await elements.runAll.click();
+  assert.equal(elements.runAllStatus.textContent, "Run All complete.");
+  assert.match(prompts[0], /\nPrevious title\n$/);
+  assert.ok(prompts[4].endsWith(body));
+  assert.ok(elements.translationInput.value.endsWith(body));
+});
+
 for (const [failure, step, failureIndex, fail] of [
   ["English title API error", "English title", 0, () => new Response("Provider error", { status: 429 })],
   ["truncated English title stream", "English title", 0, () => new Response(event("Truncated title"), {
