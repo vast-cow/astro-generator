@@ -1334,3 +1334,270 @@ test("Blog generation, AI features, configuration, copy, and download still work
   assert.equal(elements.description.value, "Three");
   assertRestored(instance, ["description"]);
 });
+
+const batchDescriptions = JSON.stringify({ descriptions: [
+  { description: "First candidate", recommendation: 2 },
+  { description: "Best candidate", recommendation: 5 },
+  { description: "Last candidate", recommendation: 4 }
+] });
+const batchResponses = ["Fresh English title", batchDescriptions, "Titre", "Résumé", "Texte"];
+
+function batchApp() {
+  const instance = app();
+  const { elements } = instance;
+  configure(instance);
+  edit(elements.content, "# Draft heading\n\nBody with **Markdown**");
+  edit(elements.title, "Previous title");
+  edit(elements.englishTitle, "Previous English title");
+  edit(elements.description, "Previous description");
+  edit(elements.date, "2026-11-15T09:30");
+  edit(elements.filename, "previous-blog.md");
+  elements.output.value = original;
+  edit(elements.translationFilename, "previous-translation.md");
+  edit(elements.translationInput, "Previous translation input");
+  edit(elements.targetLanguage, "French");
+  return instance;
+}
+
+function assertRunAllIdle(elements) {
+  assertTranslationIdle(elements);
+  for (const id of ["runAll", "extractTitle", "generateEnglishTitle", "generateDescription",
+    "generate", "copy", "download"]) {
+    assert.equal(elements[id].disabled, false, id);
+  }
+  for (const id of ["content", "date", "title", "englishTitle", "description", "filename"]) {
+    assert.equal(elements[id].readOnly, false, id);
+  }
+}
+
+test("Run All sits below Content and translates the newly generated Markdown in the selected language", async () => {
+  const instance = batchApp();
+  const { elements, context, buttons } = instance;
+  assert.match(html, /id="content"[^>]*><\/textarea>\s*<button id="runAll"[^>]*>Run All<\/button>[\s\S]*?<label for="date">/);
+  const prompts = [];
+  const firstResponse = deferred();
+  context.fetch = async (_, options) => {
+    const request = JSON.parse(options.body);
+    const index = prompts.push(request.messages[0].content) - 1;
+    if (index === 0) {
+      assert.equal(elements.title.value, "Draft heading");
+      assert.equal(elements.content.value, "Body with **Markdown**");
+      return firstResponse.promise;
+    }
+    if (index === 1) {
+      assert.equal(elements.englishTitle.value, batchResponses[0]);
+      assert.equal(elements.filename.value, "previous-blog.md");
+      assert.equal(elements.output.value, original);
+      assert.equal(elements.translationInput.value, "Previous translation input");
+      assert.equal(buttons[0].classList.contains("active"), true);
+    } else {
+      assert.equal(elements.filename.value, "20261115-fresh-english-title.md");
+      assert.equal(elements.translationFilename.value, elements.filename.value);
+      assert.equal(elements.translationInput.value, elements.output.value);
+      assert.equal(buttons[1].classList.contains("active"), true);
+      assert.equal(elements.translate.classList.contains("active"), true);
+      assert.equal(elements.translationStatus.textContent, `Translating ${["title", "description", "body"][index - 2]}...`);
+    }
+    return streamed(batchResponses[index]);
+  };
+
+  const running = elements.runAll.click();
+  await Promise.resolve();
+  assert.equal(prompts.length, 1);
+  for (const id of ["runAll", "extractTitle", "generateEnglishTitle", "generateDescription",
+    "generate", "copyFromBlog", "translatePost", "copy", "download"]) {
+    assert.equal(elements[id].disabled, true, id);
+    elements[id].click();
+  }
+  assert.equal(elements.content.readOnly, true);
+  assert.equal(prompts.length, 1);
+  assert.equal(elements.output.value, original);
+  assert.equal(elements.translationInput.value, "Previous translation input");
+  assert.deepEqual(instance.copied, []);
+  assert.deepEqual(instance.downloads, []);
+
+  firstResponse.resolve(streamed(batchResponses[0]));
+  await running;
+  assert.equal(prompts.length, 5);
+  assert.match(prompts[0], /into English:\n\nDraft heading\n$/);
+  assert.ok(prompts[1].endsWith("Body with **Markdown**"));
+  assert.match(prompts[2], /^Translate the following article title into French\.[\s\S]*\nDraft heading$/);
+  assert.match(prompts[3], /^Translate the following article description into French\.[\s\S]*\nBest candidate$/);
+  assert.match(prompts[4], /^Translate the following article body into French\.[\s\S]*\nBody with \*\*Markdown\*\*$/);
+  assert.equal(elements.description.value, "Best candidate");
+  assert.match(elements.output.value, /description: "Best candidate"/);
+  assert.match(elements.translationOutput.value, /title: "Titre"\ndescription: "Résumé"/);
+  assert.ok(elements.translationOutput.value.endsWith("Texte"));
+  assert.equal(elements.targetLanguage.value, "French");
+  assert.equal(elements.translationStatus.textContent, "Translation complete.");
+  assert.equal(elements.runAllStatus.textContent, "Run All complete.");
+  assertRunAllIdle(elements);
+  elements.descriptionOptionsList.children[1].children[1].click();
+  assert.equal(elements.description.value, "Last candidate");
+});
+
+test("Run All reports missing input and never forwards earlier generation results", async () => {
+  const { elements, context } = batchApp();
+  edit(elements.content, "Body without a heading");
+  edit(elements.title, "");
+  let requests = 0;
+  context.fetch = async () => {
+    requests++;
+    return streamed(batchResponses[0]);
+  };
+  await elements.runAll.click();
+  assert.match(elements.runAllStatus.textContent, /stopped at Extract/);
+  assert.equal(requests, 0);
+  assertRunAllIdle(elements);
+
+  edit(elements.content, "# Title without a body");
+  await elements.runAll.click();
+  assert.match(elements.runAllStatus.textContent, /stopped at Description/);
+  assert.equal(requests, 1);
+  assert.equal(elements.output.value, original);
+  assert.equal(elements.translationInput.value, "Previous translation input");
+  assertRunAllIdle(elements);
+});
+
+for (const [failure, step, failureIndex, fail] of [
+  ["English title API error", "English title", 0, () => new Response("Provider error", { status: 429 })],
+  ["truncated English title stream", "English title", 0, () => new Response(event("Truncated title"), {
+    headers: { "Content-Type": "text/event-stream" }
+  })],
+  ["empty English title", "English title", 0, () => streamed('""')],
+  ["invalid description candidates", "Description", 1, () => streamed("Invalid candidates")],
+  ["translation API error", "Translate", 3, () => new Response("Provider error", { status: 429 })]
+]) {
+  test(`Run All stops on ${failure} and can retry`, async () => {
+    const { elements, context } = batchApp();
+    let requests = 0;
+    context.fetch = async () => {
+      const index = requests++;
+      return index === failureIndex ? fail() : streamed(batchResponses[index]);
+    };
+    await elements.runAll.click();
+    assert.equal(requests, failureIndex + 1);
+    assert.equal(elements.runAllStatus.textContent, `Run All stopped at ${step}.`);
+    if (step === "Translate") {
+      assert.match(elements.translationStatus.textContent, /Error translating description.*429/);
+    } else {
+      assert.equal(elements.output.value, original);
+      assert.equal(elements.filename.value, "previous-blog.md");
+      assert.equal(elements.translationInput.value, "Previous translation input");
+      assert.equal(elements.translationFilename.value, "previous-translation.md");
+    }
+    assertRunAllIdle(elements);
+
+    requests = 0;
+    context.fetch = async () => streamed(batchResponses[requests++]);
+    await elements.runAll.click();
+    assert.equal(requests, 5);
+    assert.equal(elements.title.value, "Draft heading");
+    assert.equal(elements.runAllStatus.textContent, "Run All complete.");
+    assertRunAllIdle(elements);
+  });
+}
+
+for (const [index, step] of ["English title", "Description"].entries()) {
+  test(`Blog Clear cancels Run All during ${step} and late results cannot affect a retry`, async () => {
+    const { elements, context } = batchApp();
+    const oldResponse = deferred();
+    const pending = deferred();
+    let oldRequests = 0;
+    context.fetch = async (_, { signal }) => {
+      if (oldRequests++ < index) return streamed(batchResponses[0]);
+      pending.resolve(signal);
+      return oldResponse.promise;
+    };
+    const oldRun = elements.runAll.click();
+    const oldSignal = await pending.promise;
+    elements.clearBlog.click();
+    assert.equal(oldSignal.aborted, true);
+    assert.equal(elements.runAllStatus.textContent, `Run All cancelled at ${step}.`);
+    for (const id of ["content", "title", "englishTitle", "description", "filename", "output"]) {
+      assert.equal(elements[id].value, "", id);
+    }
+    assert.equal(elements.translationInput.value, "Previous translation input");
+    assertRunAllIdle(elements);
+
+    edit(elements.title, "New manual title");
+    edit(elements.content, "New content without a heading");
+    let newRequests = 0;
+    context.fetch = async () => streamed(batchResponses[newRequests++]);
+    await elements.runAll.click();
+    oldResponse.resolve(streamed(index === 0 ? "Stale English title" : batchDescriptions));
+    await oldRun;
+    assert.equal(oldRequests, index + 1);
+    assert.equal(newRequests, 5);
+    assert.equal(elements.title.value, "New manual title");
+    assert.equal(elements.englishTitle.value, "Fresh English title");
+    assert.match(elements.translationInput.value, /New content without a heading$/);
+    assert.equal(elements.runAllStatus.textContent, "Run All complete.");
+    assertRunAllIdle(elements);
+  });
+}
+
+test("Translate Cancel stops Run All through the existing stream controls and allows another batch", async () => {
+  const { elements, buttons, context } = batchApp();
+  const pending = deferred();
+  let requests = 0;
+  let cancelled = false;
+  context.fetch = async (_, { signal }) => {
+    const index = requests++;
+    if (index < 2) return streamed(batchResponses[index]);
+    pending.resolve(signal);
+    return new Response(new ReadableStream({
+      start(controller) { controller.enqueue(encoder.encode(event("Partial title"))); },
+      cancel() { cancelled = true; }
+    }), { headers: { "Content-Type": "text/event-stream" } });
+  };
+
+  const running = elements.runAll.click();
+  const signal = await pending.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(elements.translate.classList.contains("active"), true);
+  assert.equal(elements.translationStatus.textContent, "Translating title...");
+  assert.match(elements.translationTitleProgress.textContent, /Partial title/);
+  assert.equal(elements.cancelTranslation.hidden, false);
+  elements.cancelTranslation.click();
+  assert.equal(signal.aborted, true);
+  assert.equal(cancelled, true);
+  assert.equal(elements.runAllStatus.textContent, "Run All cancelled at Translate.");
+  assert.equal(elements.translationStatus.textContent, "Translation cancelled.");
+  assertRunAllIdle(elements);
+
+  buttons[0].click();
+  let retries = 0;
+  context.fetch = async () => streamed(batchResponses[retries++]);
+  await Promise.all([running, elements.runAll.click()]);
+  assert.equal(requests, 3);
+  assert.equal(retries, 5);
+  assert.equal(elements.translationStatus.textContent, "Translation complete.");
+  assert.equal(elements.runAllStatus.textContent, "Run All complete.");
+  assertRunAllIdle(elements);
+});
+
+test("Run All is disabled while individual Blog AI or translation actions are running", async () => {
+  const { elements, context } = batchApp();
+  edit(elements.translationInput, original);
+  const pending = [deferred(), deferred(), deferred()];
+  let requests = 0;
+  context.fetch = async () => pending[requests++]?.promise ?? streamed("Translated");
+  const title = elements.generateEnglishTitle.click();
+  const description = elements.generateDescription.click();
+  const translation = elements.translatePost.click();
+  assert.equal(requests, 3);
+  assert.equal(elements.runAll.disabled, true);
+  elements.runAll.click();
+  assert.equal(requests, 3);
+
+  pending[0].resolve(streamed(batchResponses[0]));
+  pending[1].resolve(streamed(batchResponses[1]));
+  await Promise.all([title, description]);
+  assert.equal(elements.runAll.disabled, true);
+  pending[2].resolve(streamed("Translated title"));
+  await translation;
+  assert.equal(requests, 5);
+  assert.equal(elements.runAllStatus.textContent, "");
+  assertRunAllIdle(elements);
+});

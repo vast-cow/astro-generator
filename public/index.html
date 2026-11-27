@@ -207,6 +207,9 @@
       placeholder="Write your Markdown content here..."
     ></textarea>
 
+    <button id="runAll" type="button">Run All</button>
+    <div id="runAllStatus" class="status" role="status"></div>
+
     <label for="date">Writing date and time</label>
     <input id="date" type="datetime-local" autocomplete="off">
 
@@ -416,6 +419,9 @@
     let activeTranslation = null;
     let translationComplete = false;
 
+    const runAllButton = document.getElementById("runAll");
+    const runAllStatus = document.getElementById("runAllStatus");
+    let activeRunAll = null;
     const generateButton = document.getElementById("generate");
     const copyButton = document.getElementById("copy");
     const downloadButton = document.getElementById("download");
@@ -442,6 +448,8 @@
       document.getElementById("descriptionOptionsList");
 
     let blogAIController = new AbortController();
+    let englishTitleRunning = false;
+    let descriptionRunning = false;
 
     const apiEndpointInput = document.getElementById("apiEndpoint");
     const apiKeyInput = document.getElementById("apiKey");
@@ -1253,6 +1261,7 @@ ${text}`;
         button.textContent = "Use";
 
         button.addEventListener("click", () => {
+          if (activeRunAll) return;
           descriptionInput.value = item.description;
           saveTabFields("blog");
         });
@@ -1502,14 +1511,26 @@ ${text}`;
       return true;
     }
 
+    function updateActionButtons() {
+      const runningAll = Boolean(activeRunAll);
+      const translating = Boolean(activeTranslation);
+      runAllButton.disabled = runningAll || englishTitleRunning || descriptionRunning || translating;
+      for (const button of [extractTitleButton, generateButton, copyButton, downloadButton]) {
+        button.disabled = runningAll;
+      }
+      generateEnglishTitleButton.disabled = runningAll || englishTitleRunning;
+      generateDescriptionButton.disabled = runningAll || descriptionRunning;
+      translatePostButton.disabled = runningAll || translating;
+      copyFromBlogButton.disabled = runningAll || translating;
+    }
+
     function setTranslationRunning(running) {
-      translatePostButton.disabled = running;
       translatePostButton.textContent = running ? "Translating..." : "Translate";
       cancelTranslationButton.hidden = !running;
       cancelTranslationButton.disabled = !running;
-      copyFromBlogButton.disabled = running;
       translationInput.readOnly = running;
       targetLanguage.disabled = running;
+      updateActionButtons();
     }
 
     function cancelTranslation() {
@@ -1520,6 +1541,7 @@ ${text}`;
       controller.abort();
       translationStatus.textContent = "Translation cancelled.";
       setTranslationRunning(false);
+      cancelRunAll();
     }
 
     function clearTranslationProgress() {
@@ -1528,7 +1550,6 @@ ${text}`;
     }
 
     async function translatePost() {
-      if (translatePostButton.disabled) return;
       const language = targetLanguage.value.trim();
       const model = getTranslationModel();
       let document;
@@ -1591,6 +1612,7 @@ ${text}`;
         translationComplete = true;
         saveTabFields("translate");
         translationStatus.textContent = "Translation complete.";
+        return true;
       } catch (error) {
         if (!isCurrentTranslation()) return;
         translationStatus.textContent = `Error translating ${component}: ${error.message}. Output is incomplete.`;
@@ -1604,13 +1626,15 @@ ${text}`;
     }
 
     function setEnglishTitleRunning(running) {
-      generateEnglishTitleButton.disabled = running;
+      englishTitleRunning = running;
       generateEnglishTitleButton.textContent = running ? "Translating..." : "Translate with AI";
+      updateActionButtons();
     }
 
     function setDescriptionRunning(running) {
-      generateDescriptionButton.disabled = running;
+      descriptionRunning = running;
       generateDescriptionButton.textContent = running ? "Generating..." : "Generate with AI";
+      updateActionButtons();
     }
 
     async function generateEnglishTitle() {
@@ -1637,16 +1661,21 @@ ${text}`;
           createTitleTranslationPrompt(title),
           false,
           englishTitleAIProgress,
-          { modelOverride: translationModel, signal }
+          { modelOverride: translationModel, requireCompletion: Boolean(activeRunAll), signal }
         );
         signal.throwIfAborted();
 
-        englishTitleInput.value = translation
+        const englishTitle = translation
           .replace(/^```(?:text)?\s*/i, "")
           .replace(/\s*```$/, "")
           .replace(/^["“”]|["“”]$/g, "")
           .trim();
+        if (!englishTitle) {
+          throw new Error("The generated English title was empty.");
+        }
+        englishTitleInput.value = englishTitle;
         saveTabFields("blog");
+        return true;
       } catch (error) {
         if (signal.aborted) return;
         console.error(error);
@@ -1680,13 +1709,14 @@ ${text}`;
           createPrompt(body),
           true,
           descriptionAIProgress,
-          { signal }
+          { requireCompletion: Boolean(activeRunAll), signal }
         );
         signal.throwIfAborted();
         const descriptions =
           parseDescriptionJSON(generatedContent);
 
         showDescriptionOptions(descriptions);
+        return true;
       } catch (error) {
         if (signal.aborted) return;
         console.error(error);
@@ -1698,40 +1728,110 @@ ${text}`;
       }
     }
 
-    document.querySelectorAll(".tab-button")
-      .forEach(button => {
-        button.addEventListener("click", () => {
-          const selectedTab = button.dataset.tab;
-
-          document
-            .querySelectorAll(".tab-button")
-            .forEach(item => {
-              item.classList.toggle(
-                "active",
-                item === button
-              );
-            });
-
-          document
-            .querySelectorAll(".tab")
-            .forEach(tab => {
-              tab.classList.toggle(
-                "active",
-                tab.id === selectedTab
-              );
-            });
-        });
+    function selectTab(selectedTab) {
+      document.querySelectorAll(".tab-button").forEach(button => {
+        button.classList.toggle("active", button.dataset.tab === selectedTab);
       });
+      document.querySelectorAll(".tab").forEach(tab => {
+        tab.classList.toggle("active", tab.id === selectedTab);
+      });
+    }
 
-    generateButton.addEventListener(
-      "click",
-      generatePost
-    );
+    function copyFromBlog() {
+      translationFilename.value = filenameInput.value;
+      translationInput.value = output.value;
+      translationComplete = false;
+      translationOutput.value = "";
+      saveTabFields("translate");
+      clearTranslationProgress();
+      return true;
+    }
 
-    translatePostButton.addEventListener("click", translatePost);
+    function setRunAll(run) {
+      activeRunAll = run;
+      const running = Boolean(run);
+      for (const field of [contentInput, dateInput, titleInput, englishTitleInput,
+        descriptionInput, filenameInput]) {
+        field.readOnly = running;
+      }
+      descriptionOptions.inert = running;
+      updateActionButtons();
+    }
+
+    function cancelRunAll() {
+      if (!activeRunAll) return;
+      runAllStatus.textContent = `Run All cancelled at ${activeRunAll.step}.`;
+      setRunAll(null);
+    }
+
+    async function runAll() {
+      const run = { step: "Extract" };
+      const steps = [
+        ["Extract", () => {
+          if (!extractTitle() && !titleInput.value.trim()) {
+            throw new Error("Enter a title or start the content with a # heading first.");
+          }
+          return true;
+        }],
+        ["English title", generateEnglishTitle],
+        ["Description", generateDescription],
+        ["Generate", generatePost],
+        ["Copy from Blog", copyFromBlog],
+        ["Translate", () => {
+          selectTab("translate");
+          return translatePost();
+        }]
+      ];
+
+      setRunAll(run);
+      try {
+        for (const [step, action] of steps) {
+          run.step = step;
+          runAllStatus.textContent = `Run All: ${step}...`;
+          const succeeded = await action();
+          if (activeRunAll !== run) return;
+          if (!succeeded) {
+            runAllStatus.textContent = `Run All stopped at ${step}.`;
+            return;
+          }
+        }
+        runAllStatus.textContent = "Run All complete.";
+      } catch (error) {
+        if (activeRunAll === run) {
+          runAllStatus.textContent = `Run All stopped at ${run.step}. ${error.message}`;
+        }
+      } finally {
+        if (activeRunAll === run) setRunAll(null);
+      }
+    }
+
+    document.querySelectorAll(".tab-button").forEach(button => {
+      button.addEventListener("click", () => selectTab(button.dataset.tab));
+    });
+
+    for (const [button, action] of [
+      [runAllButton, runAll],
+      [extractTitleButton, extractTitle],
+      [generateEnglishTitleButton, generateEnglishTitle],
+      [generateDescriptionButton, generateDescription],
+      [generateButton, generatePost],
+      [copyFromBlogButton, copyFromBlog],
+      [translatePostButton, translatePost]
+    ]) {
+      button.addEventListener("click", () => {
+        if (!button.disabled) return action();
+      });
+    }
+
     cancelTranslationButton.addEventListener("click", cancelTranslation);
 
     document.getElementById("clearBlog").addEventListener("click", () => {
+      if (activeRunAll) {
+        cancelTranslation();
+        cancelRunAll();
+      } else {
+        runAllStatus.textContent = "";
+      }
       blogAIController.abort();
       blogAIController = new AbortController();
       setEnglishTitleRunning(false);
@@ -1750,32 +1850,8 @@ ${text}`;
       clearTranslationProgress();
     });
 
-    copyFromBlogButton.addEventListener("click", () => {
-      if (copyFromBlogButton.disabled) return;
-      translationFilename.value = filenameInput.value;
-      translationInput.value = output.value;
-      translationComplete = false;
-      translationOutput.value = "";
-      saveTabFields("translate");
-      clearTranslationProgress();
-    });
-
-    extractTitleButton.addEventListener(
-      "click",
-      extractTitle
-    );
-
-    generateEnglishTitleButton.addEventListener(
-      "click",
-      generateEnglishTitle
-    );
-
-    generateDescriptionButton.addEventListener(
-      "click",
-      generateDescription
-    );
-
     copyButton.addEventListener("click", async () => {
+      if (copyButton.disabled) return;
       const text = output.value || generatePost();
 
       await navigator.clipboard.writeText(text);
@@ -1788,6 +1864,7 @@ ${text}`;
     });
 
     downloadButton.addEventListener("click", () => {
+      if (downloadButton.disabled) return;
       const text = output.value || generatePost();
 
       const blob = new Blob([text], {
