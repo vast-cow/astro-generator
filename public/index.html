@@ -1868,7 +1868,12 @@ ${text}`;
     let copyTranslationTimer;
     copyTranslationButton.addEventListener("click", async () => {
       if (copyTranslationButton.disabled) return;
-      await navigator.clipboard.writeText(translationOutput.value);
+      try {
+        await navigator.clipboard.writeText(translationOutput.value);
+      } catch {
+        alert("Could not copy the translation to the clipboard.");
+        return;
+      }
       copyTranslationButton.textContent = "Copied";
       clearTimeout(copyTranslationTimer);
       copyTranslationTimer = setTimeout(() => {

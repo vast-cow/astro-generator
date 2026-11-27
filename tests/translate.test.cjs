@@ -1348,6 +1348,16 @@ test("Translate Copy preserves the full Markdown and is disabled when Output is 
   assert.equal(button.disabled, false);
   assert.equal(assertRestored(instance, ["translationOutput"]).elements.copyTranslation.disabled, false);
 
+  const { clipboard } = context.navigator;
+  const writeText = clipboard.writeText;
+  clipboard.writeText = async () => { throw new Error("Clipboard permission denied"); };
+  await button.click();
+  assert.deepEqual(instance.alerts, ["Could not copy the translation to the clipboard."]);
+  assert.deepEqual(copied, []);
+  assert.equal(button.textContent, "Copy");
+  assert.equal(button.disabled, false);
+  clipboard.writeText = writeText;
+
   let resetLabel;
   context.setTimeout = (callback, delay) => {
     assert.equal(delay, 1000);
