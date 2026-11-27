@@ -278,7 +278,6 @@
 
     <div class="actions">
       <button id="copy" type="button">Copy</button>
-      <button id="download" type="button">Download .md</button>
     </div>
   </section>
 
@@ -316,6 +315,7 @@
 
     <label for="translationOutput">Output</label>
     <textarea id="translationOutput" readonly></textarea>
+    <button id="copyTranslation" type="button" disabled>Copy</button>
     <a id="translationOutputLink" class="output-link" role="link" aria-disabled="true"
       target="_blank" rel="noopener noreferrer">Open in new tab</a>
   </section>
@@ -410,6 +410,7 @@
     const cancelTranslationButton = document.getElementById("cancelTranslation");
     const translationStatus = document.getElementById("translationStatus");
     const translationOutput = document.getElementById("translationOutput");
+    const copyTranslationButton = document.getElementById("copyTranslation");
     const translationOutputLink = document.getElementById("translationOutputLink");
     const translationProgress = {
       title: document.getElementById("translationTitleProgress"),
@@ -424,7 +425,6 @@
     let activeRunAll = null;
     const generateButton = document.getElementById("generate");
     const copyButton = document.getElementById("copy");
-    const downloadButton = document.getElementById("download");
 
     const extractTitleButton =
       document.getElementById("extractTitle");
@@ -523,13 +523,14 @@
       link.setAttribute("aria-disabled", String(!url));
     }
 
-    function updateOutputLinks(tab = "config") {
+    function updateOutputControls(tab = "config") {
       if (tab === "blog" || tab === "config") {
         setOutputLink(blogOutputLink, createOutputUrl(
           blogLinkUrl.value, filenameInput.value, output.value
         ));
       }
       if (tab === "translate" || tab === "config") {
+        copyTranslationButton.disabled = translationOutput.value === "";
         setOutputLink(translationOutputLink, translationComplete ? createOutputUrl(
           translateLinkUrl.value, translationFilename.value, translationOutput.value
         ) : null);
@@ -549,7 +550,7 @@
 
     // Programmatic value assignments also call this; they emit no input/change event.
     function saveTabFields(tab) {
-      updateOutputLinks(tab);
+      updateOutputControls(tab);
       try {
         const values = Object.fromEntries(
           Object.entries(tabFields[tab]).map(([name, field]) => [name, field.value])
@@ -578,7 +579,7 @@
         }
         if (migrateConfig && saved) saveTabFields(tab);
       }
-      updateOutputLinks();
+      updateOutputControls();
     }
 
     function clearTabFields(tab, ...preservedFields) {
@@ -1516,7 +1517,7 @@ ${text}`;
       const runningAll = Boolean(activeRunAll);
       const translating = Boolean(activeTranslation);
       runAllButton.disabled = runningAll || englishTitleRunning || descriptionRunning || translating;
-      for (const button of [extractTitleButton, generateButton, copyButton, downloadButton]) {
+      for (const button of [extractTitleButton, generateButton, copyButton]) {
         button.disabled = runningAll;
       }
       generateEnglishTitleButton.disabled = runningAll || englishTitleRunning;
@@ -1864,22 +1865,15 @@ ${text}`;
       }, 1000);
     });
 
-    downloadButton.addEventListener("click", () => {
-      if (downloadButton.disabled) return;
-      const text = output.value || generatePost();
-
-      const blob = new Blob([text], {
-        type: "text/markdown;charset=utf-8"
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = filenameInput.value.trim() || createFilename();
-      link.click();
-
-      URL.revokeObjectURL(url);
+    let copyTranslationTimer;
+    copyTranslationButton.addEventListener("click", async () => {
+      if (copyTranslationButton.disabled) return;
+      await navigator.clipboard.writeText(translationOutput.value);
+      copyTranslationButton.textContent = "Copied";
+      clearTimeout(copyTranslationTimer);
+      copyTranslationTimer = setTimeout(() => {
+        copyTranslationButton.textContent = "Copy";
+      }, 1000);
     });
 
     dateInput.value = toLocalInputValue(new Date());

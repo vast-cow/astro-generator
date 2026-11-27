@@ -52,7 +52,9 @@ responses. They cover tab order, independent Translate fields, explicit copying
 from Blog, edits preserved across tab switches and translation, source-preserving
 frontmatter replacement, three independent requests, both endpoint formats,
 partial streaming updates, errors and retries, model selection, and existing Blog
-features. Persistence coverage includes input/change events, restoration after
+features. Clipboard tests verify Blog's **Copy** action and the removal of its
+download button, along with exact Translate output copying and the disabled state
+after clearing. Persistence coverage includes input/change events, restoration after
 reload, pathname isolation, empty values and defaults, legacy configuration
 migration, invalid or unavailable storage, button and AI updates, and partial
 streamed output after cancellation. Cancellation coverage includes all three steps
@@ -65,7 +67,8 @@ After making changes, serve `public/` locally and verify:
 
 - title extraction and frontmatter generation;
 - filename normalization and local date handling;
-- clipboard and file download actions;
+- clipboard copying in Blog and Translate, including line breaks, trailing
+  spaces, and the disabled Translate **Copy** button when **Output** is empty;
 - automatic saving and restoration of all tabs after reload, including generated
   output, independent Translate fields, and configuration without a save button;
 - light and dark color schemes;

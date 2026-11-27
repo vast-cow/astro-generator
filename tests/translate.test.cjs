@@ -82,34 +82,26 @@ function app({
     .map(match => element(match[1]));
   const alerts = [];
   const copied = [];
-  const downloads = [];
   const context = vm.createContext({
     window: { location: new URL(href) },
     document: {
       getElementById: id => elements[id],
       querySelectorAll: selector => selector === ".tab-button" ? buttons :
         [elements.blog, elements.config, elements.translate],
-      createElement: tag => {
-        const node = element();
-        if (tag === "a") node.click = () => downloads.push(node);
-        return node;
-      }
+      createElement: () => element()
     },
     navigator: { clipboard: { writeText: async text => copied.push(text) } },
-    URL: class extends URL {
-      static createObjectURL() { return "blob:test"; }
-      static revokeObjectURL() {}
-    },
-    Blob, TextDecoder, Uint8Array, AbortController, Date: dateConstructor,
+    URL, TextDecoder, Uint8Array, AbortController, Date: dateConstructor,
     localStorage,
     alert: message => alerts.push(message),
     console: { error() {} },
     setTimeout() {},
+    clearTimeout() {},
     fetch: () => { throw new Error("Unexpected API request"); }
   });
   vm.runInContext(script, context);
   return {
-    context, elements, buttons, alerts, copied, downloads, storage,
+    context, elements, buttons, alerts, copied, storage,
     run: code => vm.runInContext(code, context)
   };
 }
@@ -1287,9 +1279,11 @@ test("failed, incomplete, empty, and truncated API streams report errors", async
   }
 });
 
-test("Blog generation, AI features, configuration, copy, and download still work", async () => {
+test("Blog generation, AI features, configuration, and copy still work with the download button removed", async () => {
   const instance = app();
   const { elements, context } = instance;
+  assert.equal(elements.download, undefined);
+  assert.doesNotMatch(html, /Download \.md/);
   elements.content.value = '# Original title\n\nBody with "quotes"';
   elements.englishTitle.value = "My First Post!";
   elements.description.value = 'A "description"';
@@ -1300,9 +1294,8 @@ test("Blog generation, AI features, configuration, copy, and download still work
   assert.equal(elements.filename.value, "20261115-my-first-post.md");
   assert.match(elements.output.value, /pubDatetime: 2026-11-15T09:30:00[+-]\d\d:\d\d/);
   await elements.copy.click();
-  elements.download.click();
   assert.equal(instance.copied[0], elements.output.value);
-  assert.equal(instance.downloads[0].download, elements.filename.value);
+  assert.equal(elements.copy.textContent, "Copied");
   configure(instance);
   context.fetch = async (_, options) => {
     assert.equal(JSON.parse(options.body).model, "translator");
@@ -1335,6 +1328,44 @@ test("Blog generation, AI features, configuration, copy, and download still work
   assertRestored(instance, ["description"]);
 });
 
+test("Translate Copy preserves the full Markdown and is disabled when Output is empty", async () => {
+  const instance = app();
+  const { elements, context, copied } = instance;
+  const button = elements.copyTranslation;
+  assert.match(html, /<textarea id="translationOutput"[^>]*><\/textarea>\s*<button id="copyTranslation"/);
+  assert.equal(button.disabled, true);
+  await button.click();
+  assert.deepEqual(copied, []);
+
+  configure(instance);
+  edit(elements.translationInput, original);
+  const body = "First line  \nSecond line\n\nLast line  ";
+  const responses = ["Translated title", "Translated description", body];
+  context.fetch = async () => streamed(responses.shift());
+  await elements.translatePost.click();
+  const markdown = elements.translationOutput.value;
+  assert.ok(markdown.endsWith(body));
+  assert.equal(button.disabled, false);
+  assert.equal(assertRestored(instance, ["translationOutput"]).elements.copyTranslation.disabled, false);
+
+  let resetLabel;
+  context.setTimeout = (callback, delay) => {
+    assert.equal(delay, 1000);
+    resetLabel = callback;
+  };
+  await button.click();
+  assert.deepEqual(copied, [markdown]);
+  assert.equal(button.textContent, "Copied");
+  resetLabel();
+  assert.equal(button.textContent, "Copy");
+
+  elements.clearTranslate.click();
+  assert.equal(elements.translationOutput.value, "");
+  assert.equal(button.disabled, true);
+  await button.click();
+  assert.deepEqual(copied, [markdown]);
+});
+
 const batchDescriptions = JSON.stringify({ descriptions: [
   { description: "First candidate", recommendation: 2 },
   { description: "Best candidate", recommendation: 5 },
@@ -1362,7 +1393,7 @@ function batchApp() {
 function assertRunAllIdle(elements) {
   assertTranslationIdle(elements);
   for (const id of ["runAll", "extractTitle", "generateEnglishTitle", "generateDescription",
-    "generate", "copy", "download"]) {
+    "generate", "copy"]) {
     assert.equal(elements[id].disabled, false, id);
   }
   for (const id of ["content", "date", "title", "englishTitle", "description", "filename"]) {
@@ -1405,7 +1436,7 @@ test("Run All sits below Content and translates the newly generated Markdown in 
   await Promise.resolve();
   assert.equal(prompts.length, 1);
   for (const id of ["runAll", "extractTitle", "generateEnglishTitle", "generateDescription",
-    "generate", "copyFromBlog", "translatePost", "copy", "download"]) {
+    "generate", "copyFromBlog", "translatePost", "copy"]) {
     assert.equal(elements[id].disabled, true, id);
     elements[id].click();
   }
@@ -1414,7 +1445,6 @@ test("Run All sits below Content and translates the newly generated Markdown in 
   assert.equal(elements.output.value, original);
   assert.equal(elements.translationInput.value, "Previous translation input");
   assert.deepEqual(instance.copied, []);
-  assert.deepEqual(instance.downloads, []);
 
   firstResponse.resolve(streamed(batchResponses[0]));
   await running;

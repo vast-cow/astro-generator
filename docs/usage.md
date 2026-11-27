@@ -10,7 +10,7 @@
 4. Enter an English title. This is normalized into the filename slug.
 5. Add a short description.
 6. Select **Generate** to create the finished Markdown and filename.
-7. Select **Copy** or **Download .md**.
+7. Select **Copy** to copy the generated Markdown to the clipboard.
 
 For example, a title of `My First Post` and a date of January 15, 2026 produce
 the filename `20260115-my-first-post.md`. The generated document has this
@@ -43,8 +43,9 @@ The date-time offset is derived from the browser's local timezone.
 5. Select **Translate**. Follow the separate **Title**, **Description**, and
    **Body** progress areas as responses stream in. Select **Cancel** at any point
    to stop the translation.
-6. Wait for **Translation complete.**, then select and copy the finished
-   Markdown from **Output**.
+6. Wait for **Translation complete.**, then select **Copy** below **Output**.
+   It copies the full Markdown, including line breaks and trailing spaces, and
+   shows **Copied** for one second. **Copy** is disabled when **Output** is empty.
 
 Title, description, and body are translated in that order with three separate
 streaming API requests. Each uses the target language and the configured
@@ -119,8 +120,7 @@ generated output, and Translate requires a completed translation.
 
 ## AI configuration
 
-The AI features are optional; Markdown generation, copying, and downloading do
-not require an API.
+Markdown generation and clipboard copying work without an API.
 
 1. Open the **Config** tab.
 2. Enter the complete OpenAI-compatible endpoint, such as
